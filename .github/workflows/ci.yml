@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Tests and quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify downloaded modules
+        run: go mod verify
+
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check generated localization catalogs
+        run: |
+          go run ./tools/localize catalogs
+          git diff --exit-code -- locales/zh-Hans.json locales/zh-Hant.json locales/en.json
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            printf 'These files need gofmt:\n%s\n' "$files" >&2
+            exit 1
+          fi
+
+      - name: Run tests with the race detector
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -shuffle=on -p 1 ./... -count=1 -timeout=180s
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Verify pinned Wintun binaries
+        run: bash scripts/fetch-wintun.sh
+
+      - name: Verify third-party notices
+        run: bash scripts/check-notices.sh
+
+      - name: Check executable size budgets
+        run: bash scripts/check-size.sh
+
+  compile:
+    name: Compile ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Compile
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -buildvcs=false -o "$RUNNER_TEMP/vray-$GOOS-$GOARCH" .

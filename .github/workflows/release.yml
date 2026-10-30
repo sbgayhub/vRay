@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Check tag, version and changelog
+        shell: bash
+        run: |
+          version="$(jq -r .version mygo.json)"
+          test "$GITHUB_REF_NAME" = "v$version"
+          grep -Fq "[$version]" CHANGELOG.md
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+  build:
+    name: Build and upload ${{ matrix.name }}
+    needs: draft-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-latest, platform: "darwin/amd64,darwin/arm64" }
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install the pinned MyGO CLI
+        run: |
+          go install github.com/egoist/mygo/cmd/mygo@v0.7.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Windows packaging tools
+        if: matrix.name == 'Windows'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nsis
+
+      - name: Fetch and verify Wintun
+        if: matrix.name == 'Windows'
+        run: bash scripts/fetch-wintun.sh
+
+      - name: Build, sign update manifests and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [ -z "$MYGO_UPDATER_PRIVATE_KEY" ]; then
+            echo "::error::Configure the MYGO_UPDATER_PRIVATE_KEY repository secret before releasing."
+            exit 1
+          fi
+          mygo build -platform "${{ matrix.platform }}" -upload
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish the completed draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

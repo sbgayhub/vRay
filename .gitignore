@@ -1,0 +1,25 @@
+# 构建产物
+/vray
+/vray.exe
+*.exe
+/dist/
+/build/
+/.mygo/
+
+# 编辑器
+.idea/
+.vscode/
+/.pi/
+
+# 运行产生的本地记录
+run.log
+run.err
+*.log
+
+# 运行时数据和下载的地理资源
+/data/
+
+# wintun.dll 通过下载获取，不提交到仓库：它是必须与固定哈希
+# 匹配的第三方二进制文件，提交副本会与该固定值不一致。哈希
+# 文件会提交，因此下载内容可以验证。
+/resources/windows-*/wintun.dll
