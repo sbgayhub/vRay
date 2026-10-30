@@ -14,7 +14,7 @@ concurrency:
 jobs:
   quality:
     name: Tests and quality gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       CGO_ENABLED: "0"
@@ -69,7 +69,7 @@ jobs:
 
   compile:
     name: Compile ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
