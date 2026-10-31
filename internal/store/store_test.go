@@ -26,6 +26,10 @@ func TestLoadCreatesDefaults(t *testing.T) {
 	if d.Settings.MixedPort != DefaultSettings().MixedPort {
 		t.Fatalf("settings not defaulted: %+v", d.Settings)
 	}
+	if d.Settings.LatencyConcurrency != DefaultSettings().LatencyConcurrency ||
+		d.Settings.LatencyTimeoutMS != DefaultSettings().LatencyTimeoutMS {
+		t.Fatalf("latency settings not defaulted: %+v", d.Settings)
+	}
 	if !d.Settings.AutoUpdateChecks {
 		t.Fatal("new profiles should enable the once-daily update check")
 	}
@@ -191,6 +195,9 @@ func TestMigrationFillsDefaultsForOldFile(t *testing.T) {
 	}
 	if d.Settings.MixedPort == 0 {
 		t.Fatal("settings were not defaulted")
+	}
+	if d.Settings.LatencyConcurrency == 0 || d.Settings.LatencyTimeoutMS == 0 {
+		t.Fatalf("latency settings were not defaulted: %+v", d.Settings)
 	}
 	if len(d.Profiles) != 1 {
 		t.Fatal("profiles were lost")

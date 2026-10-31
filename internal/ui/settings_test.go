@@ -18,6 +18,8 @@ func TestSettingsPageShowsStoredValues(t *testing.T) {
 	v := svc.State().Snapshot().Settings
 	v.MixedPort = 17890
 	v.LogLevel = "info"
+	v.LatencyConcurrency = 17
+	v.LatencyTimeoutMS = 2750
 	svc.SaveSettings(v)
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -28,7 +30,11 @@ func TestSettingsPageShowsStoredValues(t *testing.T) {
 	r.cur, r.route = PageSettings, pageRoutes[PageSettings].ID
 	tr := ui.NewTester(r.View, 960, 900)
 	tr.Frame()
-	for _, want := range []string{"连接", "代理模式", "本地端口", "日志级别", "窗口", "数据目录", "选择数据目录", "环境自检", "保存"} {
+	for _, want := range []string{
+		"连接", "代理模式", "本地端口", "日志级别", "延迟测试",
+		"并行数量", "单节点超时（毫秒）", "窗口", "数据目录",
+		"选择数据目录", "环境自检", "保存",
+	} {
 		if !tr.HasText(want) {
 			t.Fatalf("%q is not on screen", want)
 		}
@@ -36,6 +42,12 @@ func TestSettingsPageShowsStoredValues(t *testing.T) {
 	// 用户将看到的端口是已存储的端口。
 	if got := r.settingsF.port; got != "17890" {
 		t.Fatalf("draft port = %q, want 17890", got)
+	}
+	if got := r.settingsF.latencyConcurrency; got != "17" {
+		t.Fatalf("draft concurrency = %q, want 17", got)
+	}
+	if got := r.settingsF.latencyTimeoutMS; got != "2750" {
+		t.Fatalf("draft timeout = %q, want 2750", got)
 	}
 }
 
@@ -71,6 +83,36 @@ func TestSettingsPageBlocksBadPort(t *testing.T) {
 	}
 }
 
+// 延迟测试配置会逐字段校验，非法值不能进入保存流程。
+func TestSettingsPageBlocksBadLatencySettings(t *testing.T) {
+	r, _ := newRoot(t)
+	r.cur, r.route = PageSettings, pageRoutes[PageSettings].ID
+	tr := ui.NewTester(r.View, 960, 900)
+	tr.Frame()
+
+	for _, value := range []string{"", "abc", "0", "65"} {
+		r.settingsF.latencyConcurrency = value
+		if r.settingsF.latencyConcurrencyProblem() == "" {
+			t.Fatalf("concurrency %q was accepted", value)
+		}
+	}
+	r.settingsF.latencyConcurrency = "16"
+	if problem := r.settingsF.latencyConcurrencyProblem(); problem != "" {
+		t.Fatalf("valid concurrency rejected: %s", problem)
+	}
+
+	for _, value := range []string{"", "abc", "0", "60001"} {
+		r.settingsF.latencyTimeoutMS = value
+		if r.settingsF.latencyTimeoutProblem() == "" {
+			t.Fatalf("timeout %q was accepted", value)
+		}
+	}
+	r.settingsF.latencyTimeoutMS = "2500"
+	if problem := r.settingsF.latencyTimeoutProblem(); problem != "" {
+		t.Fatalf("valid timeout rejected: %s", problem)
+	}
+}
+
 // 从页面保存会写入用户输入的端口。
 func TestSettingsPageSavesPort(t *testing.T) {
 	r, svc := newRoot(t)
@@ -87,6 +129,28 @@ func TestSettingsPageSavesPort(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if svc.State().Snapshot().Settings.MixedPort == 18999 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("settings = %+v", svc.State().Snapshot().Settings)
+}
+
+// 从页面保存会把延迟测试参数写入持久设置。
+func TestSettingsPageSavesLatencySettings(t *testing.T) {
+	r, svc := newRoot(t)
+	r.cur, r.route = PageSettings, pageRoutes[PageSettings].ID
+	tr := ui.NewTester(r.View, 960, 900)
+	tr.Frame()
+
+	r.settingsF.latencyConcurrency = "12"
+	r.settingsF.latencyTimeoutMS = "1750"
+	svc.SaveSettings(r.settingsF.view())
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		got := svc.State().Snapshot().Settings
+		if got.LatencyConcurrency == 12 && got.LatencyTimeoutMS == 1750 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)

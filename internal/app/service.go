@@ -988,19 +988,30 @@ func (s *Service) Prober() *Prober {
 	return s.prober
 }
 
+// proberForSettings 把用户配置应用到探测器。设置在每次启动测试时读取，
+// 因此保存后无需重启应用，也不会影响正在进行的上一轮测试。
+func (s *Service) proberForSettings(set store.Settings) *Prober {
+	timeoutMS := set.LatencyTimeoutMS
+	if timeoutMS < LatencyTimeoutMSMin || timeoutMS > LatencyTimeoutMSMax {
+		timeoutMS = store.DefaultSettings().LatencyTimeoutMS
+	}
+	prober := s.Prober()
+	prober.SetLimits(set.LatencyConcurrency, time.Duration(timeoutMS)*time.Millisecond)
+	return prober
+}
+
 // TestAll 探测所有已存储节点。
 //
 // 列表在返回前读取，因此紧接着等待本次运行的调用方（或测试）不会与
 // 存储读取竞争而找不到运行记录。存储读取很廉价且已被上次 Load 缓存；
 // 真正必须离开调用线程的是探测本身。
 func (s *Service) TestAll() {
-	prober := s.Prober()
 	d, err := s.store.Load()
 	if err != nil {
 		s.setProblem("STORE_ERROR", "读取配置失败", err)
 		return
 	}
-	prober.Start(d.Profiles)
+	s.proberForSettings(d.Settings).Start(d.Profiles)
 }
 
 // CancelTest 停止测速运行。

@@ -33,6 +33,15 @@ type Latency struct {
 // ProbeDialer 向 addr 建立 TCP 连接。测试会替换它；生产环境使用真实网络。
 type ProbeDialer func(ctx context.Context, addr string) (net.Conn, error)
 
+// 延迟测试的配置范围。设置页与服务端都使用这些边界，避免把任意大的
+// 并发数或超时写进配置。
+const (
+	LatencyConcurrencyMin = 1
+	LatencyConcurrencyMax = 64
+	LatencyTimeoutMSMin   = 1
+	LatencyTimeoutMSMax   = 60_000
+)
+
 // Prober 测量节点可达性与连接耗时。
 //
 // 它刻意只做有限的测量：向节点自己的地址和端口发起 TCP 连接。它不把
@@ -47,8 +56,9 @@ type Prober struct {
 	Dial ProbeDialer
 	Now  func() time.Time
 
-	// Timeout 限制单个节点的探测时长。
-	Timeout time.Duration
+	// Concurrency 限制同时探测的节点数；Timeout 限制单个节点的探测时长。
+	Concurrency int
+	Timeout     time.Duration
 
 	mu      sync.Mutex
 	results map[string]Latency
@@ -63,15 +73,27 @@ type Prober struct {
 
 // NewProber 返回使用真实网络的探测器。
 func NewProber() *Prober {
+	concurrency, timeout := normalizedProbeLimits(0, 0)
 	return &Prober{
 		Dial: func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "tcp", addr)
 		},
-		Now:     time.Now,
-		Timeout: 5 * time.Second,
-		results: map[string]Latency{},
+		Now:         time.Now,
+		Concurrency: concurrency,
+		Timeout:     timeout,
+		results:     map[string]Latency{},
 	}
+}
+
+// SetLimits 更新下一次运行使用的并发数与单节点超时。非法值回退到默认值，
+// 过大的并发数会被限制在支持的上限内。
+func (p *Prober) SetLimits(concurrency int, timeout time.Duration) {
+	concurrency, timeout = normalizedProbeLimits(concurrency, timeout)
+	p.mu.Lock()
+	p.Concurrency = concurrency
+	p.Timeout = timeout
+	p.mu.Unlock()
 }
 
 // SetOnChange 注册请求重绘的回调。
@@ -108,9 +130,9 @@ func (p *Prober) Running() bool {
 
 // Start 探测 list 中的每个节点，并在每个结果落地时报告。
 //
-// 一次只探测一个节点，串行执行：同时向一千个节点发起探测会耗尽临时端口，
-// 让每次探测都像超时。结果仍逐个到达，列表会边测边填。运行期间再次
-// 启动会重启本次运行，这正是按钮应有的语义。
+// 使用有上限的 worker pool，而不是为每个节点创建一个 goroutine。结果仍
+// 逐个到达，列表会边测边填。运行期间再次启动会重启本次运行，这正是按钮
+// 应有的语义。
 func (p *Prober) Start(list []store.Profile) {
 	p.mu.Lock()
 	if p.cancel != nil {
@@ -121,6 +143,7 @@ func (p *Prober) Start(list []store.Profile) {
 	p.generation++
 	gen := p.generation
 	p.running = true
+	concurrency, timeout := normalizedProbeLimits(p.Concurrency, p.Timeout)
 	done := make(chan struct{})
 	p.done = done
 	// 先把所有节点标为 pending，让列表显示排队情况。
@@ -130,34 +153,78 @@ func (p *Prober) Start(list []store.Profile) {
 	p.mu.Unlock()
 	p.notify()
 
-	go func() {
-		defer close(done)
-		defer func() {
-			p.mu.Lock()
-			if p.generation == gen {
-				p.running = false
-			}
-			p.mu.Unlock()
-			p.notify()
-		}()
+	go p.run(ctx, list, gen, done, concurrency, timeout)
+}
 
-		for _, prof := range list {
-			res := p.probeOne(ctx, prof)
-			p.mu.Lock()
-			stale := p.generation != gen
-			if !stale {
-				p.results[prof.ID] = res
-			}
-			p.mu.Unlock()
-			if stale {
-				return
-			}
-			p.notify()
-			if ctx.Err() != nil {
-				return
-			}
+// run 执行一次延迟测试。任务通过无缓冲通道分发给固定数量的 worker，
+// 因此连接数有明确上限，也不会因为节点很多而创建同等数量的 goroutine。
+func (p *Prober) run(
+	ctx context.Context,
+	list []store.Profile,
+	gen uint64,
+	done chan struct{},
+	concurrency int,
+	timeout time.Duration,
+) {
+	defer close(done)
+	defer func() {
+		p.mu.Lock()
+		if p.generation == gen {
+			p.running = false
 		}
+		p.mu.Unlock()
+		p.notify()
 	}()
+
+	workers := min(concurrency, len(list))
+	if workers == 0 {
+		return
+	}
+
+	jobs := make(chan store.Profile)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case prof, ok := <-jobs:
+					if !ok || ctx.Err() != nil {
+						return
+					}
+					res := p.probeOne(ctx, prof, timeout)
+					if p.publish(gen, prof.ID, res) {
+						p.notify()
+					}
+				}
+			}
+		}()
+	}
+
+feed:
+	for _, prof := range list {
+		select {
+		case jobs <- prof:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+// publish 只让当前代的任务写入结果，防止取消后的迟到结果覆盖新一轮运行。
+func (p *Prober) publish(gen uint64, id string, result Latency) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.generation != gen {
+		return false
+	}
+	p.results[id] = result
+	return true
 }
 
 // Cancel 停止运行，并把仍在排队的节点标为跳过，避免它们永远转圈。
@@ -199,11 +266,7 @@ func (p *Prober) notify() {
 }
 
 // probeOne 测量一个节点。
-func (p *Prober) probeOne(ctx context.Context, prof store.Profile) Latency {
-	timeout := p.Timeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
+func (p *Prober) probeOne(ctx context.Context, prof store.Profile, timeout time.Duration) Latency {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -230,6 +293,25 @@ func (p *Prober) probeOne(ctx context.Context, prof store.Profile) Latency {
 		ms = 0
 	}
 	return Latency{State: LatencyOK, MS: ms}
+}
+
+// normalizedProbeLimits 返回可安全用于运行的限制值。默认值来自存储设置，
+// 保证新建的探测器与设置页显示的值一致。
+func normalizedProbeLimits(concurrency int, timeout time.Duration) (int, time.Duration) {
+	defaults := store.DefaultSettings()
+	if concurrency <= 0 {
+		concurrency = defaults.LatencyConcurrency
+	}
+	if concurrency > LatencyConcurrencyMax {
+		concurrency = LatencyConcurrencyMax
+	}
+	if timeout <= 0 {
+		timeout = time.Duration(defaults.LatencyTimeoutMS) * time.Millisecond
+	}
+	if maxTimeout := time.Duration(LatencyTimeoutMSMax) * time.Millisecond; timeout > maxTimeout {
+		timeout = maxTimeout
+	}
+	return concurrency, timeout
 }
 
 // LatencyLabel 是节点行展示单个探测结果的文字。

@@ -26,6 +26,8 @@ type SettingsView struct {
 	MixedPort           int    `json:"mixedPort"`
 	LogLevel            string `json:"logLevel"`
 	ProbeURL            string `json:"probeUrl"`
+	LatencyConcurrency  int    `json:"latencyConcurrency"`
+	LatencyTimeoutMS    int    `json:"latencyTimeoutMs"`
 	CloseToTray         bool   `json:"closeToTray"`
 	OpenAtLogin         bool   `json:"openAtLogin"`
 	AutoReconnect       bool   `json:"autoReconnect"`
@@ -63,6 +65,8 @@ func settingsViewOf(s store.Settings) SettingsView {
 		MixedPort:           s.MixedPort,
 		LogLevel:            s.LogLevel,
 		ProbeURL:            s.ProbeURL,
+		LatencyConcurrency:  s.LatencyConcurrency,
+		LatencyTimeoutMS:    s.LatencyTimeoutMS,
 		CloseToTray:         s.CloseToTray,
 		OpenAtLogin:         s.OpenAtLogin,
 		AutoReconnect:       s.AutoReconnect,
@@ -117,6 +121,14 @@ func (s *Service) SaveSettings(v SettingsView) <-chan struct{} {
 			fail("SETTINGS_INVALID", "探测地址必须是 http(s) 链接", nil)
 			return
 		}
+		if v.LatencyConcurrency < LatencyConcurrencyMin || v.LatencyConcurrency > LatencyConcurrencyMax {
+			fail("SETTINGS_INVALID", "并行数量需在 1–64 之间", nil)
+			return
+		}
+		if v.LatencyTimeoutMS < LatencyTimeoutMSMin || v.LatencyTimeoutMS > LatencyTimeoutMSMax {
+			fail("SETTINGS_INVALID", "单节点超时需在 1–60000 毫秒之间", nil)
+			return
+		}
 		if v.Theme == "" {
 			v.Theme = d.Settings.Theme
 			if v.Theme == "" {
@@ -153,6 +165,8 @@ func (s *Service) SaveSettings(v SettingsView) <-chan struct{} {
 		next.MixedPort = v.MixedPort
 		next.LogLevel = v.LogLevel
 		next.ProbeURL = v.ProbeURL
+		next.LatencyConcurrency = v.LatencyConcurrency
+		next.LatencyTimeoutMS = v.LatencyTimeoutMS
 		next.CloseToTray = v.CloseToTray
 		next.OpenAtLogin = v.OpenAtLogin
 		next.AutoReconnect = v.AutoReconnect

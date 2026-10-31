@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -16,16 +17,18 @@ import (
 // 它采用副本而非实时绑定：页面显示已存储的值，用户编辑草稿，保存时写入。
 // 直接编辑快照会让输入到一半的端口进入重连流程。
 type settingsForm struct {
-	lookupKey  string
-	pending    bool
-	mode       string
-	port       string
-	logLevel   string
-	probeURL   string
-	closeTray  bool
-	openLogin  bool
-	autoRecon  bool
-	autoUpdate bool
+	lookupKey          string
+	pending            bool
+	mode               string
+	port               string
+	logLevel           string
+	probeURL           string
+	latencyConcurrency string
+	latencyTimeoutMS   string
+	closeTray          bool
+	openLogin          bool
+	autoRecon          bool
+	autoUpdate         bool
 
 	// loaded 表示草稿已填充过一次。此后草稿归用户所有：参见 sync。
 	loaded bool
@@ -57,6 +60,8 @@ func (f *settingsForm) fromSnapshot(snap app.Snapshot) {
 	f.port = strconv.Itoa(snap.Settings.MixedPort)
 	f.logLevel = snap.Settings.LogLevel
 	f.probeURL = snap.Settings.ProbeURL
+	f.latencyConcurrency = strconv.Itoa(snap.Settings.LatencyConcurrency)
+	f.latencyTimeoutMS = strconv.Itoa(snap.Settings.LatencyTimeoutMS)
 	f.closeTray = snap.Settings.CloseToTray
 	f.openLogin = snap.Settings.OpenAtLogin
 	f.autoRecon = snap.Settings.AutoReconnect
@@ -67,15 +72,19 @@ func (f *settingsForm) fromSnapshot(snap app.Snapshot) {
 // view 按服务所需的形式返回草稿。
 func (f *settingsForm) view() app.SettingsView {
 	port, _ := strconv.Atoi(strings.TrimSpace(f.port))
+	latencyConcurrency, _ := strconv.Atoi(strings.TrimSpace(f.latencyConcurrency))
+	latencyTimeoutMS, _ := strconv.Atoi(strings.TrimSpace(f.latencyTimeoutMS))
 	return app.SettingsView{
-		Mode:             f.mode,
-		MixedPort:        port,
-		LogLevel:         f.logLevel,
-		ProbeURL:         strings.TrimSpace(f.probeURL),
-		CloseToTray:      f.closeTray,
-		OpenAtLogin:      f.openLogin,
-		AutoReconnect:    f.autoRecon,
-		AutoUpdateChecks: f.autoUpdate,
+		Mode:               f.mode,
+		MixedPort:          port,
+		LogLevel:           f.logLevel,
+		ProbeURL:           strings.TrimSpace(f.probeURL),
+		LatencyConcurrency: latencyConcurrency,
+		LatencyTimeoutMS:   latencyTimeoutMS,
+		CloseToTray:        f.closeTray,
+		OpenAtLogin:        f.openLogin,
+		AutoReconnect:      f.autoRecon,
+		AutoUpdateChecks:   f.autoUpdate,
 	}
 }
 
@@ -91,6 +100,38 @@ func (f *settingsForm) portProblem() string {
 	}
 	if port <= 0 || port > 65535 {
 		return "端口需在 1–65535 之间"
+	}
+	return ""
+}
+
+// latencyConcurrencyProblem 在并发数量可用时返回 ""。
+func (f *settingsForm) latencyConcurrencyProblem() string {
+	raw := strings.TrimSpace(f.latencyConcurrency)
+	if raw == "" {
+		return "并行数量不能为空"
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return "并行数量必须是数字"
+	}
+	if value < app.LatencyConcurrencyMin || value > app.LatencyConcurrencyMax {
+		return fmt.Sprintf("并行数量需在 %d–%d 之间", app.LatencyConcurrencyMin, app.LatencyConcurrencyMax)
+	}
+	return ""
+}
+
+// latencyTimeoutProblem 在超时毫秒数可用时返回 ""。
+func (f *settingsForm) latencyTimeoutProblem() string {
+	raw := strings.TrimSpace(f.latencyTimeoutMS)
+	if raw == "" {
+		return "单节点超时不能为空"
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return "单节点超时必须是数字"
+	}
+	if value < app.LatencyTimeoutMSMin || value > app.LatencyTimeoutMSMax {
+		return fmt.Sprintf("单节点超时需在 %d–%d 毫秒之间", app.LatencyTimeoutMSMin, app.LatencyTimeoutMSMax)
 	}
 	return ""
 }
@@ -111,7 +152,10 @@ func (r *Root) syncSettings(snap app.Snapshot) {
 
 func (r *Root) settingsSave() {
 	f := &r.settingsF
-	if f.pending || f.portProblem() != "" {
+	if f.pending ||
+		f.portProblem() != "" ||
+		f.latencyConcurrencyProblem() != "" ||
+		f.latencyTimeoutProblem() != "" {
 		return
 	}
 	r.svc.SaveSettings(f.view())
@@ -168,6 +212,22 @@ func (r *Root) settingsPage(c *ui.Context, snap app.Snapshot) {
 				Help: tr(c, "用于判断代理是否可用，一般是返回 204 的地址"),
 			}, func() {
 				ui.TextInput(c, &f.probeURL).FillWidth()
+			})
+		})
+
+		section(c, "延迟测试", func() {
+			form.FieldGroup(c, tr(c, "并行数量"), form.FieldGroupOptions{
+				Help:  tr(c, "同时探测的节点数。数值越大，测速越快，但会占用更多网络连接。"),
+				Error: tr(c, f.latencyConcurrencyProblem()),
+			}, func() {
+				ui.TextInput(c, &f.latencyConcurrency).Width(120).Placeholder("8")
+			})
+
+			form.FieldGroup(c, tr(c, "单节点超时（毫秒）"), form.FieldGroupOptions{
+				Help:  tr(c, "单个节点建立 TCP 连接的最长等待时间。超时后标记为失败。"),
+				Error: tr(c, f.latencyTimeoutProblem()),
+			}, func() {
+				ui.TextInput(c, &f.latencyTimeoutMS).Width(120).Placeholder("5000")
 			})
 		})
 

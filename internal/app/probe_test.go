@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,6 +117,66 @@ func TestProberPublishesEachResultAsItLands(t *testing.T) {
 	}
 }
 
+// 并发数必须真正限制同时在途的探测，而不是一次性启动所有节点。
+func TestProberRunsAtConfiguredConcurrency(t *testing.T) {
+	const concurrency = 3
+	p := NewProber()
+	p.SetLimits(concurrency, 2*time.Second)
+
+	started := make(chan struct{}, 5)
+	release := make(chan struct{})
+	var active, peak atomic.Int32
+	p.Dial = func(ctx context.Context, _ string) (net.Conn, error) {
+		current := active.Add(1)
+		for {
+			previous := peak.Load()
+			if current <= previous || peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		active.Add(-1)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return fakeConn{}, nil
+	}
+
+	profiles := make([]store.Profile, 5)
+	for i := range profiles {
+		profiles[i] = probeProfile(strconv.Itoa(i), "node"+strconv.Itoa(i), 443)
+	}
+	p.Start(profiles)
+	for range concurrency {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("configured workers did not start")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("more dials started than the configured concurrency")
+	default:
+	}
+	if got := active.Load(); got != concurrency {
+		t.Fatalf("active dials = %d, want %d", got, concurrency)
+	}
+
+	close(release)
+	p.Wait()
+	if got := peak.Load(); got != concurrency {
+		t.Fatalf("peak concurrency = %d, want %d", got, concurrency)
+	}
+	if got := len(p.Results()); got != len(profiles) {
+		t.Fatalf("results = %d, want %d", got, len(profiles))
+	}
+}
+
 // Cancel 停止运行，不留下仍在自旋的任务。
 func TestProberCancelLeavesNothingPending(t *testing.T) {
 	block := make(chan struct{})
@@ -193,7 +255,7 @@ func TestProberStaleRunDoesNotOverwriteNewRun(t *testing.T) {
 func TestProberRespectsTimeout(t *testing.T) {
 	p := NewProber()
 	p.Now = time.Now
-	p.Timeout = 50 * time.Millisecond
+	p.SetLimits(1, 50*time.Millisecond)
 	p.Dial = func(ctx context.Context, addr string) (net.Conn, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()

@@ -697,6 +697,6 @@ func (s *Service) TestPolicy(groupID string) <-chan struct{} {
 			return
 		}
 		s.state.Update(func(sn *Snapshot) { sn.GroupResult = "" })
-		s.Prober().Start(profiles)
+		s.proberForSettings(d.Settings).Start(profiles)
 	})
 }

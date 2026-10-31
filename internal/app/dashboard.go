@@ -113,11 +113,17 @@ func (s *Service) TestNode(id string) {
 		return
 	}
 	go func() {
-		profile, err := s.store.GetProfile(id)
+		d, err := s.store.Load()
 		if err != nil {
-			s.setProblem("NO_PROFILE", "找不到该节点", err)
+			s.setProblem("STORE_ERROR", "读取配置失败", err)
 			return
 		}
-		s.Prober().Start([]store.Profile{profile})
+		for _, profile := range d.Profiles {
+			if profile.ID == id {
+				s.proberForSettings(d.Settings).Start([]store.Profile{profile})
+				return
+			}
+		}
+		s.setProblem("NO_PROFILE", "找不到该节点", nil)
 	}()
 }

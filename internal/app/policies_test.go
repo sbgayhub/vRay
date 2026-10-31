@@ -134,18 +134,23 @@ func TestPolicyProbeDeduplicatesMembersAndSkipsUDP(t *testing.T) {
 	if err := svc.Load(); err != nil {
 		t.Fatal(err)
 	}
-	addresses := []string{}
+	addresses := make(chan string, 2)
 	probe := svc.Prober()
 	probe.Dial = func(_ context.Context, address string) (net.Conn, error) {
-		addresses = append(addresses, address)
+		addresses <- address
 		a, b := net.Pipe()
 		_ = b.Close()
 		return a, nil
 	}
 	awaitOperation(t, svc.TestPolicy("root"))
 	probe.Wait()
-	if len(addresses) != 2 || addresses[0] != "p1.invalid:443" || addresses[1] != "p2.invalid:443" {
-		t.Fatalf("probe did not respect scope, deduplication or UDP: %v", addresses)
+	close(addresses)
+	got := make(map[string]bool, 2)
+	for address := range addresses {
+		got[address] = true
+	}
+	if len(got) != 2 || !got["p1.invalid:443"] || !got["p2.invalid:443"] {
+		t.Fatalf("probe did not respect scope, deduplication or UDP: %v", got)
 	}
 	if svc.State().Snapshot().Settings.ActiveGroup != "" {
 		t.Fatal("probing changed the active policy")

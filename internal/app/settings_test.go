@@ -43,11 +43,17 @@ func TestSaveSettingsPersists(t *testing.T) {
 	v.MixedPort = 12345
 	v.LogLevel = "info"
 	v.ProbeURL = "https://example.com/generate_204"
+	v.LatencyConcurrency = 17
+	v.LatencyTimeoutMS = 2750
 	v.AutoReconnect = false
 	svc.SaveSettings(v)
 
 	got := waitSettings(t, svc, func(s SettingsView) bool { return s.MixedPort == 12345 })
-	if got.LogLevel != "info" || got.ProbeURL != "https://example.com/generate_204" || got.AutoReconnect {
+	if got.LogLevel != "info" ||
+		got.ProbeURL != "https://example.com/generate_204" ||
+		got.LatencyConcurrency != 17 ||
+		got.LatencyTimeoutMS != 2750 ||
+		got.AutoReconnect {
 		t.Fatalf("settings = %+v", got)
 	}
 }
@@ -108,6 +114,8 @@ func TestSaveSettingsRefusesBadEnums(t *testing.T) {
 		{"log level", func(v *SettingsView) { v.LogLevel = "verbose" }},
 		{"probe url", func(v *SettingsView) { v.ProbeURL = "ftp://example.com" }},
 		{"missing probe host", func(v *SettingsView) { v.ProbeURL = "https://?missing-host" }},
+		{"latency concurrency", func(v *SettingsView) { v.LatencyConcurrency = 0 }},
+		{"latency timeout", func(v *SettingsView) { v.LatencyTimeoutMS = 60001 }},
 		{"theme", func(v *SettingsView) { v.Theme = "unknown" }},
 		{"material", func(v *SettingsView) { v.Material = "unknown" }},
 	}
@@ -128,6 +136,22 @@ func TestSaveSettingsRefusesBadEnums(t *testing.T) {
 			t.Fatalf("problem = %+v, want SETTINGS_INVALID", svc.State().Snapshot().Problem)
 		})
 	}
+}
+
+// 保存后的并发数与超时在下一次延迟测试开始时生效。
+func TestLatencyTestUsesSavedLimits(t *testing.T) {
+	svc, _ := newTestService(t)
+	view := svc.State().Snapshot().Settings
+	view.LatencyConcurrency = 3
+	view.LatencyTimeoutMS = 250
+	<-svc.SaveSettings(view)
+
+	svc.TestAll()
+	prober := svc.Prober()
+	if prober.Concurrency != 3 || prober.Timeout != 250*time.Millisecond {
+		t.Fatalf("prober limits = %d/%s, want 3/250ms", prober.Concurrency, prober.Timeout)
+	}
+	prober.Wait()
 }
 
 func TestAppearanceSettingsSurviveReload(t *testing.T) {

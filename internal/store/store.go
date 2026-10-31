@@ -122,23 +122,27 @@ type Settings struct {
 	TermsAcceptedAt      time.Time `json:"termsAcceptedAt,omitempty"`
 	LogLevel             string    `json:"logLevel"`
 	ProbeURL             string    `json:"probeUrl"`
+	LatencyConcurrency   int       `json:"latencyConcurrency,omitempty"`
+	LatencyTimeoutMS     int       `json:"latencyTimeoutMs,omitempty"`
 }
 
 // DefaultSettings 是文件新建时使用的默认值。
 func DefaultSettings() Settings {
 	return Settings{
-		Language:         "zh-Hans",
-		Accent:           "system",
-		Theme:            "system",
-		Material:         "none",
-		Mode:             "system-proxy",
-		RoutingMode:      "rule",
-		MixedPort:        2080,
-		CloseToTray:      true,
-		AutoReconnect:    true,
-		AutoUpdateChecks: true,
-		LogLevel:         "warning",
-		ProbeURL:         "https://www.gstatic.com/generate_204",
+		Language:           "zh-Hans",
+		Accent:             "system",
+		Theme:              "system",
+		Material:           "none",
+		Mode:               "system-proxy",
+		RoutingMode:        "rule",
+		MixedPort:          2080,
+		CloseToTray:        true,
+		AutoReconnect:      true,
+		AutoUpdateChecks:   true,
+		LogLevel:           "warning",
+		ProbeURL:           "https://www.gstatic.com/generate_204",
+		LatencyConcurrency: 8,
+		LatencyTimeoutMS:   5000,
 	}
 }
 
@@ -265,6 +269,12 @@ func (f *File) load() (Data, error) {
 	}
 	if d.Settings.RoutingMode == "" {
 		d.Settings.RoutingMode = "rule"
+	}
+	if d.Settings.LatencyConcurrency <= 0 {
+		d.Settings.LatencyConcurrency = DefaultSettings().LatencyConcurrency
+	}
+	if d.Settings.LatencyTimeoutMS <= 0 {
+		d.Settings.LatencyTimeoutMS = DefaultSettings().LatencyTimeoutMS
 	}
 	return d, nil
 }
