@@ -282,6 +282,43 @@ func TestFileWriterRotates(t *testing.T) {
 	}
 }
 
+// 轮转重命名失败（Windows 上备份文件正被其他进程读取）后，写入必须继续
+// 且不再逐行重试轮转；句柄绝不能停在已关闭的文件上。
+func TestFileWriterRotateFailureKeepsWriting(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("重命名失败依赖 Windows 的文件锁语义")
+	}
+	path := filepath.Join(t.TempDir(), "app.log")
+
+	// 占住备份路径：Windows 下对正被打开的文件重命名会失败。
+	backup, err := os.OpenFile(path+".1", os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open backup: %v", err)
+	}
+	defer backup.Close()
+
+	w, err := NewFileWriter(path)
+	if err != nil {
+		t.Fatalf("NewFileWriter: %v", err)
+	}
+	w.MaxBytes = 64
+	defer w.Close()
+
+	line := strings.Repeat("x", 32)
+	for i := 0; i < 20; i++ {
+		w.Write(Entry{At: time.Now(), Level: LevelInfo, Text: line})
+	}
+
+	// 轮转失败后日志必须完整落到原文件，而不是丢进已关闭的句柄。
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Size() < 20*40 {
+		t.Fatalf("log lost lines after failed rotation: %d bytes", info.Size())
+	}
+}
+
 // Snapshot 返回副本：UI 不能破坏缓冲区。
 func TestSnapshotIsACopy(t *testing.T) {
 	r := NewRing(5)

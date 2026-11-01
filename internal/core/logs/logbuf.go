@@ -7,6 +7,7 @@ package logs
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -376,17 +377,26 @@ func (w *FileWriter) Write(e Entry) {
 // 一代备份足以诊断崩溃，又不让日志无限增长。
 func (w *FileWriter) rotate() {
 	w.f.Close()
+	// 句柄已失效，先置 nil：任何失败路径都不允许把后续写入引到
+	// 已关闭的文件上——那里的错误会被 Write 静默吞掉，文件日志无声死亡。
+	w.f = nil
 	backup := w.path + ".1"
 	_ = os.Remove(backup)
 	if err := os.Rename(w.path, backup); err != nil {
-		// 重命名失败：继续追加，而不是丢失文件句柄。
+		// 重命名失败（Windows 上旧备份正被其他进程读取并不罕见）：原文件
+		// 仍在，重新打开继续追加。written 归零而不是保留 ≥MaxBytes 的值，
+		// 否则每写一行都会重走一轮 Close/Rename/OpenFile。
+		slog.Warn("日志：轮转重命名失败，继续追加到原文件", "错误", err)
 		if f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
-			w.f = f
+			w.f, w.written = f, 0
+		} else {
+			slog.Warn("日志：无法重新打开日志文件，文件日志已停止", "错误", err)
 		}
 		return
 	}
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		slog.Warn("日志：轮转后无法重建日志文件，文件日志已停止", "错误", err)
 		return
 	}
 	w.f = f
