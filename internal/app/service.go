@@ -642,25 +642,26 @@ func (s *Service) importText(text string) {
 		return
 	}
 
+	// 凭据写入是 OS 凭据库 I/O，放在服务锁之外；节点随后在锁内一次
+	// 读-改-写入库，而不是每个节点重写整库。
+	stored, policyNodes, err := s.prepareProfiles(res.Profiles, "")
+	if err != nil {
+		s.setImport(0, "保存节点失败："+TrimDetail(err.Error()))
+		return
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	policyNodes := map[string]string{}
-	for i := range res.Profiles {
-		p := res.Profiles[i]
-		p.ID = newID()
-		policyNodes[p.Name] = p.ID
-		if err := s.storeProfile(&p); err != nil {
-			s.setImport(0, "保存节点失败："+TrimDetail(err.Error()))
-			return
-		}
+	d, err := s.store.Load()
+	if err == nil {
+		d.Profiles = append(d.Profiles, stored...)
+		err = s.store.Save(d)
+	}
+	s.mu.Unlock()
+	if err != nil {
+		s.setImport(0, "保存节点失败："+TrimDetail(err.Error()))
+		return
 	}
 	if len(res.Groups) > 0 {
-		d, err := s.store.Load()
-		if err == nil {
-			d.Groups = mergePolicyGroups(d.Groups, res.Groups, "local:"+newID(), policyNodes)
-			err = s.store.Save(d)
-		}
-		if err != nil {
+		if err := s.appendGroups(res.Groups, "local:"+newID(), policyNodes); err != nil {
 			s.setImport(len(res.Profiles), "保存策略组失败")
 			return
 		}
@@ -670,6 +671,50 @@ func (s *Service) importText(text string) {
 		return
 	}
 	s.setImport(len(res.Profiles), "")
+}
+
+// prepareProfiles 为每个节点分配 ID、把凭据移入凭据保管器，返回可直接
+// 入库的副本与 名称→ID 映射（供策略组成员引用）。
+//
+// 凭据写入是 OS 凭据库 I/O，必须在服务锁之外进行；整库保存由调用方在
+// 锁内一次完成，逐节点 PutProfile 会把读-改-写放大 N 倍，数百节点的
+// 订阅导入会在锁内阻塞连接与断开数秒。
+func (s *Service) prepareProfiles(profiles []store.Profile, sourceID string) ([]store.Profile, map[string]string, error) {
+	stored := make([]store.Profile, 0, len(profiles))
+	policyNodes := make(map[string]string, len(profiles))
+	for i := range profiles {
+		p := profiles[i]
+		p.ID = newID()
+		if sourceID != "" {
+			p.SourceID = sourceID
+		}
+		policyNodes[p.Name] = p.ID
+		p.RawOutbound = withoutOutboundSecret(p.RawOutbound)
+		if p.SecretRef != "" {
+			key := "profile/" + p.ID + "/secret"
+			if err := s.secrets.Set(key, []byte(p.SecretRef)); err != nil {
+				return nil, policyNodes, err
+			}
+			p.SecretRef = key
+		}
+		stored = append(stored, p)
+	}
+	return stored, policyNodes, nil
+}
+
+// appendGroups 在服务锁内把合并后的策略组写入存储并刷新快照。
+func (s *Service) appendGroups(groups []store.PolicyGroup, sourceKey string, policyNodes map[string]string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, err := s.store.Load()
+	if err == nil {
+		d.Groups = mergePolicyGroups(d.Groups, groups, sourceKey, policyNodes)
+		err = s.store.Save(d)
+	}
+	if err != nil {
+		return err
+	}
+	return s.Load()
 }
 
 // setImport 记录最近一次导入的结果。
@@ -722,19 +767,6 @@ func (s *Service) disconnectLocked() error {
 		sn.Traffic = Traffic{}
 	})
 	return nil
-}
-
-// storeProfile 为解析出的节点分配 ID，并连同凭据一起保存。
-func (s *Service) storeProfile(p *store.Profile) error {
-	p.RawOutbound = withoutOutboundSecret(p.RawOutbound)
-	if p.SecretRef != "" {
-		key := "profile/" + p.ID + "/secret"
-		if err := s.secrets.Set(key, []byte(p.SecretRef)); err != nil {
-			return err
-		}
-		p.SecretRef = key
-	}
-	return s.store.PutProfile(*p)
 }
 
 // secretOf 从凭据保管器读回节点凭据。

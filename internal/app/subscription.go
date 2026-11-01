@@ -149,16 +149,24 @@ func (s *Service) importSubscription(rawURL, name string) {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if name == "" {
 		name = subscriptionName(rawURL)
 	}
 	sourceID := newID()
+
+	// 凭据写入（订阅地址与各节点）是 OS 凭据库 I/O，全部在服务锁之外
+	// 完成；锁内只做一次整库读-改-写。逐节点写库会让数百节点的订阅
+	// 导入阻塞连接与断开数秒。
 	urlKey := "source/" + sourceID + "/url"
 	if err := s.secrets.Set(urlKey, []byte(rawURL)); err != nil {
 		s.setImport(0, "保存订阅地址失败："+TrimDetail(err.Error()))
+		return
+	}
+	stored, policyNodes, err := s.prepareProfiles(res.Profiles, sourceID)
+	if err != nil {
+		// 订阅还没入库，回收已写入的地址，避免留下无主的机密。
+		_ = s.secrets.Delete(urlKey)
+		s.setImport(0, "保存节点失败："+TrimDetail(err.Error()))
 		return
 	}
 
@@ -179,42 +187,27 @@ func (s *Service) importSubscription(rawURL, name string) {
 			src.ExpireAt = time.Unix(info.Expire, 0)
 		}
 	}
-	if err := s.store.PutSource(src); err != nil {
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, err := s.store.Load()
+	if err == nil {
+		d.Sources = append(d.Sources, src)
+		d.Profiles = append(d.Profiles, stored...)
+		if len(res.Groups) > 0 {
+			d.Groups = mergePolicyGroups(d.Groups, res.Groups, sourceID, policyNodes)
+		}
+		err = s.store.Save(d)
+	}
+	if err != nil {
 		s.setImport(0, "保存订阅失败："+TrimDetail(err.Error()))
 		return
 	}
-
-	added := 0
-	policyNodes := map[string]string{}
-	for i := range res.Profiles {
-		p := res.Profiles[i]
-		p.ID = newID()
-		p.SourceID = sourceID
-		policyNodes[p.Name] = p.ID
-		if err := s.storeProfile(&p); err != nil {
-			// 订阅本身已保存，用户可以重试；如实报告进度，
-			// 而不是假装什么都没发生。
-			s.setImport(added, "保存节点失败："+TrimDetail(err.Error()))
-			return
-		}
-		added++
-	}
-	if len(res.Groups) > 0 {
-		d, err := s.store.Load()
-		if err == nil {
-			d.Groups = mergePolicyGroups(d.Groups, res.Groups, sourceID, policyNodes)
-			err = s.store.Save(d)
-		}
-		if err != nil {
-			s.setImport(added, "保存策略组失败")
-			return
-		}
-	}
 	if err := s.Load(); err != nil {
-		s.setImport(added, "读取配置失败："+TrimDetail(err.Error()))
+		s.setImport(0, "读取配置失败："+TrimDetail(err.Error()))
 		return
 	}
-	s.setImport(added, "")
+	s.setImport(len(res.Profiles), "")
 }
 
 // subscriptionName 从订阅 URL 推导显示名称。

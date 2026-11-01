@@ -217,6 +217,12 @@ type Store interface {
 type File struct {
 	path string
 	mu   sync.Mutex
+	// 原始字节缓存：Load 发生在几乎每个业务操作里，而文件只在写路径
+	// 变化。以 mtime+size 校验命中，省去重复读盘；解析仍每次进行，
+	// 调用方拿到的 Data 依旧各自独立，不存在共享可变状态。
+	cacheMtime time.Time
+	cacheSize  int64
+	cacheRaw   []byte
 }
 
 // NewFile 返回 path 处的存储；文件不必已经存在。
@@ -233,8 +239,9 @@ func (f *File) Load() (Data, error) {
 }
 
 func (f *File) load() (Data, error) {
-	raw, err := os.ReadFile(f.path)
+	info, err := os.Stat(f.path)
 	if errors.Is(err, os.ErrNotExist) {
+		f.cacheRaw, f.cacheMtime, f.cacheSize = nil, time.Time{}, 0
 		d := Data{SchemaVersion: SchemaVersion, Settings: DefaultSettings()}
 		if err := f.write(d); err != nil {
 			return Data{}, err
@@ -243,6 +250,17 @@ func (f *File) load() (Data, error) {
 	}
 	if err != nil {
 		return Data{}, fmt.Errorf("存储：读取 %s 失败：%w", f.path, err)
+	}
+
+	var raw []byte
+	if f.cacheRaw != nil && info.ModTime().Equal(f.cacheMtime) && info.Size() == f.cacheSize {
+		raw = f.cacheRaw
+	} else {
+		raw, err = os.ReadFile(f.path)
+		if err != nil {
+			return Data{}, fmt.Errorf("存储：读取 %s 失败：%w", f.path, err)
+		}
+		f.cacheRaw, f.cacheMtime, f.cacheSize = raw, info.ModTime(), info.Size()
 	}
 
 	var d Data
@@ -348,6 +366,9 @@ func (f *File) write(d Data) error {
 	if err := os.Rename(tmpName, f.path); err != nil {
 		return fmt.Errorf("存储：重命名失败：%w", err)
 	}
+	// 写路径是文件内容变化的唯一来源，但 mtime 粒度不可靠，直接失效缓存，
+	// 让下一次 Load 重新校验。
+	f.cacheRaw, f.cacheMtime, f.cacheSize = nil, time.Time{}, 0
 	return nil
 }
 
