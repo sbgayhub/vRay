@@ -9,7 +9,7 @@
 # 特意检查两项预算：
 #   - 未裁剪构建，即开发期间 `go build` 生成的产物；
 #   - 裁剪构建（-s -w），即用于发布的产物。
-# 两项预算都记录在 docs/03-implementation-plan.md 中，也都在此处校验。
+# 两项预算都在此处校验；提高预算属于产品决策，不是构建修复。
 #
 # 用法：
 #   scripts/check-size.sh              # 检查当前平台
@@ -100,8 +100,8 @@ these happened:
   - a whole test-only or offline helper package got linked into main;
   - the Xray core version changed and upstream grew.
 
-Raising the budget is a product decision, recorded in
-docs/03-implementation-plan.md, not a build fix.
+Raising the budget is a product decision, not a build fix.
+
 EOF
 	exit 1
 fi

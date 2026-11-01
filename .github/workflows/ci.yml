@@ -36,6 +36,9 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Check pinned mygo version
+        run: bash scripts/check-mygo-version.sh
+
       - name: Check generated localization catalogs
         run: |
           go run ./tools/localize catalogs

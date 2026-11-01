@@ -73,8 +73,8 @@ these happened:
   - a whole test-only or offline helper package got linked into main;
   - the Xray core version changed and upstream grew.
 
-Raising the budget is a product decision, recorded in
-docs/03-implementation-plan.md, not a build fix.
+Raising the budget is a product decision, not a build fix.
+
 '@)
         exit 1
     }
