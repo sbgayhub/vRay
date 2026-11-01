@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ELY-Open-Source/CrychicUI/data"
 	"github.com/ELY-Open-Source/CrychicUI/icon"
 
 	"github.com/ELY-Open-Source/CrychicUI/navigation"
@@ -115,6 +116,18 @@ type Root struct {
 	logQuery string
 	logLevel logs.Level
 	logRaw   bool
+
+	// 日志页的显示缓存：签名（条目数+最新一条）与过滤条件都不变时，
+	// 每帧直接复用 logLines，跳过全量复制与逐行 Describe。
+	logStampCount int
+	logStampLast  logs.Entry
+	logCacheQuery string
+	logCacheLevel logs.Level
+	logCacheRaw   bool
+	logCacheLang  string
+	logLines      []data.LogLine
+	logFiltered   int
+	logTotal      int
 
 	// deleting 是等待确认删除的节点 ID；没有时为 ""。一次只处理一个，
 	// 以免与另一行的确认混淆。
@@ -287,7 +300,7 @@ func (r *Root) titlebar(c *ui.Context, snap app.Snapshot) {
 					}
 				}
 			}
-			r.windowButtons(c)
+			r.windowButtons(c, snap)
 		})
 }
 
@@ -295,7 +308,10 @@ func (r *Root) titlebar(c *ui.Context, snap app.Snapshot) {
 //
 // 图标使用 ui.SVG 而非文本：Unicode 方框绘制字符有各自的字重和基线，
 // 导致三者始终无法对齐，也无法匹配 Windows 绘制的细一像素线条。参见 captions.go。
-func (r *Root) windowButtons(c *ui.Context) {
+//
+// snap 由 titlebar 传入：Snapshot 是全量深拷贝，每帧为读一个布尔再做一次
+// 会让重绘成本翻倍。
+func (r *Root) windowButtons(c *ui.Context, snap app.Snapshot) {
 	if r.win == nil {
 		return
 	}
@@ -315,7 +331,7 @@ func (r *Root) windowButtons(c *ui.Context) {
 	// 关闭是唯一在悬停时变红的按钮，与 Windows 的行为一致：
 	// 它执行破坏性操作，用户也期待这一警示。
 	if r.captionButton(c, "close", "关闭", true) {
-		if r.svc.State().Snapshot().ConsentRequired {
+		if snap.ConsentRequired {
 			mygo.App.Quit()
 		} else {
 			r.win.Close()
