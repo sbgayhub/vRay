@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math"
+	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -11,6 +12,27 @@ import (
 
 const cardRadius float32 = 16
 
+// 预先构建的明暗调色板：主题每帧重建，十六进制颜色只在进程启动时解析一次。
+var (
+	darkPalette  = buildPalette(true)
+	lightPalette = buildPalette(false)
+)
+
+func buildPalette(dark bool) ui.Theme {
+	t := *ui.DarkTheme()
+	if !dark {
+		t = *ui.LightTheme()
+		t.Background, t.Surface, t.SurfaceHover, t.SurfacePressed = ui.Hex("#f3f4f6"), ui.Hex("#ffffff"), ui.Hex("#eef0f3"), ui.Hex("#e2e5ea")
+		t.Border, t.Text, t.TextMuted = ui.Hex("#d8dde5"), ui.Hex("#1b2430"), ui.Hex("#586474")
+		t.Success, t.Warning, t.Danger = ui.Hex("#187348"), ui.Hex("#8f5b0d"), ui.Hex("#b92b44")
+		return t
+	}
+	t.Background, t.Surface, t.SurfaceHover, t.SurfacePressed = ui.Hex("#171a1f"), ui.Hex("#22262d"), ui.Hex("#2d333d"), ui.Hex("#38414d")
+	t.Border, t.Text, t.TextMuted = ui.Hex("#414b59"), ui.Hex("#f2f4f8"), ui.Hex("#b4becb")
+	t.Success, t.Warning, t.Danger = ui.Hex("#6cdda5"), ui.Hex("#f2c779"), ui.Hex("#ff8994")
+	return t
+}
+
 // viewTheme 将调色板集中在一处；各控件沿用同一组令牌。
 func viewTheme(base *ui.Theme, preference string) ui.Theme {
 	dark := base.Dark
@@ -19,38 +41,17 @@ func viewTheme(base *ui.Theme, preference string) ui.Theme {
 	} else if preference == "light" {
 		dark = false
 	}
-	t := *ui.LightTheme()
+	t := lightPalette
 	if dark {
-		t = *ui.DarkTheme()
-		t.Background = ui.Hex("#171a1f")
-		t.Surface = ui.Hex("#22262d")
-		t.SurfaceHover = ui.Hex("#2d333d")
-		t.SurfacePressed = ui.Hex("#38414d")
-		t.Border = ui.Hex("#414b59")
-		t.Text = ui.Hex("#f2f4f8")
-		t.TextMuted = ui.Hex("#b4becb")
-		t.Success = ui.Hex("#6cdda5")
-		t.Warning = ui.Hex("#f2c779")
-		t.Danger = ui.Hex("#ff8994")
-	} else {
-		t.Background = ui.Hex("#f3f4f6")
-		t.Surface = ui.Hex("#ffffff")
-		t.SurfaceHover = ui.Hex("#eef0f3")
-		t.SurfacePressed = ui.Hex("#e2e5ea")
-		t.Border = ui.Hex("#d8dde5")
-		t.Text = ui.Hex("#1b2430")
-		t.TextMuted = ui.Hex("#586474")
-		t.Success = ui.Hex("#187348")
-		t.Warning = ui.Hex("#8f5b0d")
-		t.Danger = ui.Hex("#b92b44")
+		t = darkPalette
 	}
-	// 保留框架的系统强调色，包括与其形成对比的文字颜色。
+	// 字号与字体跟随框架的当前值（DPI 变化会更新它们）；强调色保留
+	// 框架的系统值，包括与其形成对比的文字颜色。
+	t.FontSize, t.Font = base.FontSize, base.Font
 	applyAccent(&t, base.Accent, base.AccentText)
 	t.Inverse, t.InverseText = t.Text, t.Background
 	t.Scrollbar = t.TextMuted.Alpha(0.45)
 	t.Radius = 10
-	t.FontSize = base.FontSize
-	t.Font = base.Font
 	return t
 }
 
@@ -160,8 +161,27 @@ func colorContrast(a, b ui.Color) float64 {
 	return (max(x, y) + 0.05) / (min(x, y) + 0.05)
 }
 
+// accentForegroundCache 记住每种关键色组合的可读文字色。重绘路径每帧
+// 调用 accentForeground 数十次，而结果只由主题的三个颜色决定；会话中的
+// 主题数量有限（含外观弹窗的预览草稿），缓存不会无界增长。
+var accentForegroundCache sync.Map // accentFgKey -> ui.Color
+
+type accentFgKey struct {
+	surface, accent, text ui.Color
+}
+
 // 强调色填充保留所选系统颜色；着色控件中的文字可能需要该颜色更深或更浅的色调才能保持可读。
 func accentForeground(t *ui.Theme) ui.Color {
+	key := accentFgKey{surface: t.Surface.Over(t.Background), accent: t.Accent, text: t.Text}
+	if v, ok := accentForegroundCache.Load(key); ok {
+		return v.(ui.Color)
+	}
+	c := computeAccentForeground(t)
+	accentForegroundCache.Store(key, c)
+	return c
+}
+
+func computeAccentForeground(t *ui.Theme) ui.Color {
 	surface := t.Surface.Over(t.Background)
 	selected := t.Accent.Alpha(0.12).Over(surface)
 	for step := range 17 {
