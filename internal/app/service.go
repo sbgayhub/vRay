@@ -128,7 +128,8 @@ type Service struct {
 	// loginSetter 应用开机自启选择；不需要它的测试中为 nil。
 	loginSetter func(bool) error
 
-	// httpClient 用于抓取订阅。nil 表示默认客户端；测试可指向自己的服务器。
+	// httpClient 用于抓取订阅。共享一个客户端以复用连接池；测试可
+	// 指向自己的服务器。
 	httpClient *http.Client
 }
 
@@ -155,6 +156,9 @@ func New(st *State, storer store.Store, keeper secrets.Keeper, engine Engine, p 
 		// 外壳会在首次连接前换成真实实现。
 		systemProxy: noEffect{},
 		dns:         noEffect{},
+		// 抓取订阅共享一个客户端：每次新建会丢掉连接池，多抓一次就多
+		// 一轮 TLS 握手。测试可以替换成指向自己服务器的客户端。
+		httpClient: &http.Client{Timeout: subscriptionTimeout},
 	}
 }
 

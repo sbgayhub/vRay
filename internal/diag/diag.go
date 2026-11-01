@@ -127,6 +127,9 @@ var subscriptionRe = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
 // base64TokenRe 匹配较长的 base64 串，订阅令牌或编码内容就是这种形态。
 var base64TokenRe = regexp.MustCompile(`[A-Za-z0-9+/_-]{32,}={0,2}`)
 
+// ipv4Re 匹配点分十进制 IPv4 地址；MaskAddress 对每个节点都要用它判定。
+var ipv4Re = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+
 // Scrub 从任意文本中移除凭据。
 //
 // 它应用于所有离开应用的字符串，包括日志行和错误详情，因为失败消息
@@ -198,7 +201,7 @@ func MaskAddress(host string) string {
 	if host == "" {
 		return ""
 	}
-	if ip := regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`).FindString(host); ip != "" {
+	if ipv4Re.MatchString(host) {
 		parts := strings.Split(host, ".")
 		return parts[0] + ".x.x." + parts[3]
 	}

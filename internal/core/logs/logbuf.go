@@ -302,13 +302,15 @@ func (r *Ring) Add(e Entry) {
 }
 
 // Snapshot 返回记录的副本，最旧的在前。
+//
+// 环形数组最多两段连续区间：两段 copy 代替逐元素取模，UI 每帧调用的
+// 持锁时间随条目数线性缩短。
 func (r *Ring) Snapshot() []Entry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Entry, r.count)
-	for i := 0; i < r.count; i++ {
-		out[i] = r.buf[(r.start+i)%len(r.buf)]
-	}
+	n := copy(out, r.buf[r.start:min(r.start+r.count, len(r.buf))])
+	copy(out[n:], r.buf[:r.count-n])
 	return out
 }
 
