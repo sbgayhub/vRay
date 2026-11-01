@@ -465,6 +465,14 @@ func (s *Service) Connect(profileID string) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
+		// 双击或重放请求：连接中或已连接时忽略。否则第二次 Start 会被
+		// 内核拒绝（已在运行），把正常运行的隧道报告成 CORE_START_FAILED，
+		// 阶段翻成 Failed。
+		switch s.state.Snapshot().Phase {
+		case PhaseConnected, PhaseConnecting:
+			return
+		}
+
 		s.state.SetPhase(PhaseConnecting, nil)
 
 		if err := s.connectLocked(profileID); err != nil {
@@ -681,6 +689,12 @@ func (s *Service) Disconnect() {
 // disconnectLocked 在停止内嵌内核前还原系统设置。调用方持有 mu，
 // 包括因路由变更而重启时。
 func (s *Service) disconnectLocked() error {
+	// 空闲时无事可做：重复的断开请求不应把阶段翻转成 Disconnecting，
+	// 也不应再次执行还原。内核运行中时阶段必然不是 Idle，因此这里
+	// 不会漏掉真实的断开。
+	if s.state.Snapshot().Phase == PhaseIdle {
+		return nil
+	}
 
 	// 在内核停止前停止采样，否则下一次读取会打到已关闭的端口，
 	// UI 会把旧速率当成当前值。
