@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -60,6 +61,7 @@ type System struct {
 	service  string // 用于命名存储并派生回退密钥
 	path     string // 用于存放超大值加密数据的文件
 	mu       sync.Mutex
+	key      []byte // 缓存的 AES 密钥；惰性生成，受 mu 保护
 }
 
 // NewSystem 返回一个 Keeper：使用 service 下的 mygo.Secrets，并使用 path 处的文件存放超大值。
@@ -76,12 +78,14 @@ func (s *System) Set(key string, value []byte) error {
 		// 较小的值会替换先前较大的值。
 		return s.removeSealed(key)
 	}
+	// 密钥的生成与值的密封必须整体持有 mu：两个大值并发 Set 时若各自
+	// 生成随机密钥，平台存储只保留后写的一把，先 seal 的值将永久无法解密。
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sealed, err := s.seal(value)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	m, err := s.readSealed()
 	if err != nil {
 		return err
@@ -138,10 +142,15 @@ func (s *System) removeSealed(key string) error {
 	return s.writeSealed(m)
 }
 
-// sealKey 返回 AES-256 密钥，并在平台存储中仅创建一次。
+// sealKey 返回 AES-256 密钥。首次调用在平台存储中创建它并缓存，之后直接
+// 复用，避免每次加解密都往返平台凭据库。调用方必须持有 s.mu。
 func (s *System) sealKey() ([]byte, error) {
+	if len(s.key) == 32 {
+		return s.key, nil
+	}
 	const name = "secrets.enc.key"
 	if k, err := s.platform.Get(name); err == nil && len(k) == 32 {
+		s.key = k
 		return k, nil
 	}
 	key := make([]byte, 32)
@@ -150,13 +159,17 @@ func (s *System) sealKey() ([]byte, error) {
 	}
 	if err := s.platform.Set(name, key); err != nil {
 		// 没有平台存储时，没有可用于保护密钥的机制；回退为根据文件路径派生的密钥，
-		// 以免数据以明文存储，并明确说明这一点。
+		// 以免数据以明文存储。该密钥可由文件路径推导，只提供混淆而非保护，
+		// 必须让用户在日志里看到这次安全降级。
+		slog.Warn("凭据：系统凭据库不可用，超大值回退为路径派生密钥（仅混淆，非安全保护）", "错误", err)
 		sum := sha256.Sum256([]byte(s.service + "|" + s.path))
-		return sum[:], nil
+		key = sum[:]
 	}
+	s.key = key
 	return key, nil
 }
 
+// seal 用 AES-GCM 密封 plain。调用方必须持有 s.mu。
 func (s *System) seal(plain []byte) ([]byte, error) {
 	key, err := s.sealKey()
 	if err != nil {
@@ -177,6 +190,7 @@ func (s *System) seal(plain []byte) ([]byte, error) {
 	return gcm.Seal(nonce, nonce, plain, nil), nil
 }
 
+// open 打开密封值。调用方必须持有 s.mu。
 func (s *System) open(sealed []byte) ([]byte, error) {
 	key, err := s.sealKey()
 	if err != nil {
