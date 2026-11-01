@@ -67,28 +67,60 @@ func (s *Service) SaveRules(rules []store.Rule) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		// 语法错误的规则在这里拒绝，而不是等到连接时：那时用户收到的
-		// 消息针对整份配置。
-		for _, r := range rules {
-			if problems := configgen.ValidateRule(toConfigRule(r)); len(problems) > 0 {
-				s.setProblem("RULE_INVALID", problems[0].Value+"："+problems[0].Message, nil)
-				return
-			}
-			switch r.Outbound {
-			case configgen.TagDirect, configgen.TagProxy, configgen.TagBlock:
-			default:
-				s.setProblem("RULE_INVALID", "规则的出口必须是 direct、proxy 或 block", nil)
-				return
-			}
-		}
+		s.saveRulesLocked(rules)
+	}()
+}
 
-		if err := s.store.SetRules(rules); err != nil {
-			s.setProblem("STORE_ERROR", "保存规则失败", err)
+// saveRulesLocked 校验并保存整份规则列表，然后刷新快照。调用方必须持有
+// s.mu。返回是否成功保存。
+func (s *Service) saveRulesLocked(rules []store.Rule) bool {
+	// 语法错误的规则在这里拒绝，而不是等到连接时：那时用户收到的
+	// 消息针对整份配置。
+	for _, r := range rules {
+		if problems := configgen.ValidateRule(toConfigRule(r)); len(problems) > 0 {
+			s.setProblem("RULE_INVALID", problems[0].Value+"："+problems[0].Message, nil)
+			return false
+		}
+		switch r.Outbound {
+		case configgen.TagDirect, configgen.TagProxy, configgen.TagBlock:
+		default:
+			s.setProblem("RULE_INVALID", "规则的出口必须是 direct、proxy 或 block", nil)
+			return false
+		}
+	}
+
+	if err := s.store.SetRules(rules); err != nil {
+		s.setProblem("STORE_ERROR", "保存规则失败", err)
+		return false
+	}
+	if err := s.Load(); err != nil {
+		s.setProblem("STORE_ERROR", "读取配置失败", err)
+		return false
+	}
+	return true
+}
+
+// mutateRules 在后台对规则列表做一次原子的读-改-写，mutate 返回 nil 表示
+// 无需写回。
+//
+// 读列表、计算新列表、写回必须发生在同一把锁内：快速连点（如连续上移）
+// 会让两次操作读到同一份列表，后写覆盖先写丢一次操作；与删除交错时，
+// 已删的规则会被写回。
+func (s *Service) mutateRules(mutate func(rules []store.Rule) []store.Rule) {
+	go func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		d, err := s.store.Load()
+		if err != nil {
+			s.setProblem("STORE_ERROR", "读取配置失败", err)
 			return
 		}
-		if err := s.Load(); err != nil {
-			s.setProblem("STORE_ERROR", "读取配置失败", err)
+		next := mutate(d.Rules)
+		if next == nil {
+			return
 		}
+		s.saveRulesLocked(next)
 	}()
 }
 
@@ -96,47 +128,36 @@ func (s *Service) SaveRules(rules []store.Rule) {
 //
 // 新规则追加到末尾：追加是唯一不会悄悄改变屏幕上现有规则含义的位置。
 func (s *Service) SaveRule(r store.Rule) {
-	s.mu.Lock()
-	d, err := s.store.Load()
-	s.mu.Unlock()
-	if err != nil {
-		s.setProblem("STORE_ERROR", "读取配置失败", err)
-		return
-	}
-
-	next := append([]store.Rule(nil), d.Rules...)
-	replaced := false
-	for i := range next {
-		if next[i].ID == r.ID {
-			r.Order = next[i].Order
-			next[i] = r
-			replaced = true
-			break
+	s.mutateRules(func(rules []store.Rule) []store.Rule {
+		next := append([]store.Rule(nil), rules...)
+		replaced := false
+		for i := range next {
+			if next[i].ID == r.ID {
+				r.Order = next[i].Order
+				next[i] = r
+				replaced = true
+				break
+			}
 		}
-	}
-	if !replaced {
-		r.Order = len(next)
-		next = append(next, r)
-	}
-	s.SaveRules(next)
+		if !replaced {
+			r.Order = len(next)
+			next = append(next, r)
+		}
+		return next
+	})
 }
 
 // DeleteRule 删除一条规则并重新编号其余规则。
 func (s *Service) DeleteRule(id string) {
-	s.mu.Lock()
-	d, err := s.store.Load()
-	s.mu.Unlock()
-	if err != nil {
-		s.setProblem("STORE_ERROR", "读取配置失败", err)
-		return
-	}
-	next := make([]store.Rule, 0, len(d.Rules))
-	for _, r := range d.Rules {
-		if r.ID != id {
-			next = append(next, r)
+	s.mutateRules(func(rules []store.Rule) []store.Rule {
+		next := make([]store.Rule, 0, len(rules))
+		for _, r := range rules {
+			if r.ID != id {
+				next = append(next, r)
+			}
 		}
-	}
-	s.SaveRules(next)
+		return next
+	})
 }
 
 // MoveRule 把一条规则上移或下移一位。
@@ -144,53 +165,42 @@ func (s *Service) DeleteRule(id string) {
 // 一次只移动一位：页面绘制上/下按钮；若允许拖拽到任意目标，当列表超出
 // 屏幕后就可能落到错误的行。
 func (s *Service) MoveRule(id string, up bool) {
-	s.mu.Lock()
-	d, err := s.store.Load()
-	s.mu.Unlock()
-	if err != nil {
-		s.setProblem("STORE_ERROR", "读取配置失败", err)
-		return
-	}
+	s.mutateRules(func(rules []store.Rule) []store.Rule {
+		ordered := append([]store.Rule(nil), rules...)
+		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Order < ordered[j].Order })
 
-	ordered := append([]store.Rule(nil), d.Rules...)
-	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Order < ordered[j].Order })
-
-	idx := -1
-	for i := range ordered {
-		if ordered[i].ID == id {
-			idx = i
-			break
+		idx := -1
+		for i := range ordered {
+			if ordered[i].ID == id {
+				idx = i
+				break
+			}
 		}
-	}
-	if idx < 0 {
-		s.setProblem("NO_RULE", "找不到该规则", nil)
-		return
-	}
-	target := idx - 1
-	if !up {
-		target = idx + 1
-	}
-	if target < 0 || target >= len(ordered) {
-		return // 已到边界：无需处理，也不是错误
-	}
-	ordered[idx], ordered[target] = ordered[target], ordered[idx]
-	s.SaveRules(ordered)
+		if idx < 0 {
+			s.setProblem("NO_RULE", "找不到该规则", nil)
+			return nil
+		}
+		target := idx - 1
+		if !up {
+			target = idx + 1
+		}
+		if target < 0 || target >= len(ordered) {
+			return nil // 已到边界：无需处理，也不是错误
+		}
+		ordered[idx], ordered[target] = ordered[target], ordered[idx]
+		return ordered
+	})
 }
 
 // SetRuleEnabled 开启或关闭一条规则。
 func (s *Service) SetRuleEnabled(id string, on bool) {
-	s.mu.Lock()
-	d, err := s.store.Load()
-	s.mu.Unlock()
-	if err != nil {
-		s.setProblem("STORE_ERROR", "读取配置失败", err)
-		return
-	}
-	next := append([]store.Rule(nil), d.Rules...)
-	for i := range next {
-		if next[i].ID == id {
-			next[i].Enabled = on
+	s.mutateRules(func(rules []store.Rule) []store.Rule {
+		next := append([]store.Rule(nil), rules...)
+		for i := range next {
+			if next[i].ID == id {
+				next[i].Enabled = on
+			}
 		}
-	}
-	s.SaveRules(next)
+		return next
+	})
 }
