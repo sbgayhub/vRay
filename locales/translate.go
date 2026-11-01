@@ -61,11 +61,29 @@ var formattedMessages = sync.OnceValue(func() []formattedMessage {
 	return result
 })
 
+// translateCache 记住 (语言, 源串) 的查询结果，包括“无译文”的未命中。
+// 视图每帧会对同一字符串反复翻译；未收录的字符串还要对全部带占位符的
+// 消息逐一正则匹配。缓存让每个字符串只付出一次匹配成本。
+var translateCache sync.Map // translateKey -> string
+
+type translateKey struct{ language, source string }
+
 // Translate 查询显式的源 UI 消息。用户内容不会经过此函数。缺少条目时保留源语言，仍可阅读。
 func Translate(language, source string) string {
 	if language == "" || language == "zh-Hans" {
 		return source
 	}
+	key := translateKey{language, source}
+	if v, ok := translateCache.Load(key); ok {
+		return v.(string)
+	}
+	translated := translateSlow(language, source)
+	translateCache.Store(key, translated)
+	return translated
+}
+
+// translateSlow 执行目录查询与格式模板匹配；结果由调用方缓存。
+func translateSlow(language, source string) string {
 	if key := sourceIndex()[source]; key != "" {
 		return Catalog.Format(language, key, nil)
 	}
