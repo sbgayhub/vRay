@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -476,9 +477,15 @@ func (s *Service) preparePolicyInput(ctx context.Context, in *configgen.Input, d
 		return fmt.Errorf("策略组成员过多，最多支持 256 个节点")
 	}
 	prepared := []configgen.PolicyNode{}
+	var failures []string
 	var mu sync.Mutex
 	var workers sync.WaitGroup
 	slots := make(chan struct{}, 6)
+	record := func(name, reason string) {
+		mu.Lock()
+		failures = append(failures, name+"："+TrimDetail(reason))
+		mu.Unlock()
+	}
 	for _, profile := range d.Profiles {
 		if !needed[profile.ID] {
 			continue
@@ -486,6 +493,8 @@ func (s *Service) preparePolicyInput(ctx context.Context, in *configgen.Input, d
 		select {
 		case slots <- struct{}{}:
 		case <-ctx.Done():
+			// 取证等待超时：该节点本次不参与。计入失败，避免组静默缩水。
+			record(profile.Name, "等待节点取证超时")
 			continue
 		}
 		profile := profile
@@ -493,6 +502,7 @@ func (s *Service) preparePolicyInput(ctx context.Context, in *configgen.Input, d
 			defer func() { <-slots }()
 			secret, err := s.secretOf(profile)
 			if err != nil {
+				record(profile.Name, err.Error())
 				return
 			}
 			node := outboundOf(profile, secret)
@@ -502,6 +512,7 @@ func (s *Service) preparePolicyInput(ctx context.Context, in *configgen.Input, d
 				node, err = provider.PrepareNode(ctx, node)
 			}
 			if err != nil {
+				record(profile.Name, err.Error())
 				return
 			}
 			mu.Lock()
@@ -510,6 +521,15 @@ func (s *Service) preparePolicyInput(ctx context.Context, in *configgen.Input, d
 		})
 	}
 	workers.Wait()
+	if len(failures) > 0 {
+		// 失败的节点会被剔除出策略组：必须留下线索，否则用户面对
+		// “候选变少/组失效”无从排查。日志页是常驻的用户可见出口。
+		slices.Sort(failures)
+		slog.Warn("策略组部分节点取证失败，已从组中剔除", "失败数", len(failures), "明细", strings.Join(failures, "；"))
+	}
+	if len(prepared) == 0 && len(failures) > 0 {
+		return fmt.Errorf("策略组的全部节点都无法使用：%s", failures[0])
+	}
 	slices.SortFunc(prepared, func(a, b configgen.PolicyNode) int { return strings.Compare(a.ID, b.ID) })
 	in.PolicyNodes, in.ActivePolicy = prepared, d.Settings.ActiveGroup
 	if len(prepared) > 0 {
