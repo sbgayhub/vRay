@@ -153,17 +153,17 @@ func (s *Sampler) sample() {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	prev, prevAt := s.last, s.lastAt
 	s.last, s.lastAt = counters, now
 
 	if prevAt.IsZero() {
 		// 仅建立基线。
+		s.mu.Unlock()
 		return
 	}
 	elapsed := now.Sub(prevAt).Seconds()
 	if elapsed <= 0 {
+		s.mu.Unlock()
 		return
 	}
 
@@ -186,7 +186,10 @@ func (s *Sampler) sample() {
 	s.totalUp += t.TotalUp
 	s.totalDown += t.TotalDown
 	t.TotalUp, t.TotalDown = s.totalUp, s.totalDown
+	s.mu.Unlock()
 
+	// 回调会一路走到状态更新与 UI 通知，绝不能在持锁状态下调用：
+	// 当前回调不碰 Sampler 只是巧合，不是保证。
 	if out != nil {
 		out(t)
 	}
