@@ -610,7 +610,10 @@ func (r *Root) memoryCard(c *ui.Context, snap app.Snapshot) {
 	t := c.Theme()
 	data := snap.Dashboard
 	ready := !data.At.IsZero()
-	bytes, label := data.Memory.WorkingSetBytes, "进程工作集"
+	bytes, label := data.Memory.PrivateWorkingSetBytes, "私有工作集"
+	if bytes == 0 {
+		bytes, label = data.Memory.WorkingSetBytes, "进程工作集"
+	}
 	if bytes == 0 {
 		bytes, label = data.Memory.RuntimeUsedBytes, "Go 运行时内存"
 	}

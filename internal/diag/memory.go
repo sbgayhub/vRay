@@ -14,19 +14,24 @@ type MemoryStats struct {
 	GCCount           uint32  `json:"gcCount"`
 	GCCPUFraction     float64 `json:"gcCPUFraction"`
 	Goroutines        int     `json:"goroutines"`
-	PrivateBytes      uint64  `json:"privateBytes,omitempty"`
-	WorkingSetBytes   uint64  `json:"workingSetBytes,omitempty"`
+	// PrivateBytes is the process commit charge, not its private working set.
+	PrivateBytes uint64 `json:"privateBytes,omitempty"`
+	// WorkingSetBytes includes both private and shareable resident pages.
+	WorkingSetBytes uint64 `json:"workingSetBytes,omitempty"`
+	// PrivateWorkingSetBytes matches the Memory column in Task Manager.
+	PrivateWorkingSetBytes uint64 `json:"privateWorkingSetBytes,omitempty"`
 }
 
 func ReadMemory() MemoryStats {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	private, workingSet := processMemory()
+	private, workingSet, privateWorkingSet := processMemory()
 	return MemoryStats{
 		HeapAllocBytes: m.HeapAlloc, HeapInuseBytes: m.HeapInuse,
 		HeapIdleBytes: m.HeapIdle, HeapReleasedBytes: m.HeapReleased,
 		RuntimeUsedBytes: m.Sys - m.HeapReleased, TotalAllocBytes: m.TotalAlloc,
 		GCCount: m.NumGC, GCCPUFraction: m.GCCPUFraction,
-		Goroutines: runtime.NumGoroutine(), PrivateBytes: private, WorkingSetBytes: workingSet,
+		Goroutines: runtime.NumGoroutine(), PrivateBytes: private,
+		WorkingSetBytes: workingSet, PrivateWorkingSetBytes: privateWorkingSet,
 	}
 }

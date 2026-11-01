@@ -49,7 +49,10 @@ func homeDashboardFixture(t *testing.T) (*Root, *app.Service) {
 			sn.History = append(sn.History, app.TrafficPoint{At: now.Add(time.Duration(i-120) * 500 * time.Millisecond), UpBps: up, DownBps: down})
 		}
 		sn.Rules = []app.RuleView{{ID: "r1", Enabled: true}, {ID: "r2", Enabled: true}, {ID: "r3", Enabled: true}}
-		sn.Dashboard = app.Dashboard{At: now.Add(time.Hour), Connections: 28, Memory: diag.MemoryStats{WorkingSetBytes: 131 << 20, HeapAllocBytes: 36 << 20, Goroutines: 48}}
+		sn.Dashboard = app.Dashboard{At: now.Add(time.Hour), Connections: 28, Memory: diag.MemoryStats{
+			PrivateWorkingSetBytes: 93 << 20, WorkingSetBytes: 151 << 20,
+			HeapAllocBytes: 36 << 20, Goroutines: 48,
+		}}
 	})
 	p := svc.Prober()
 	tick := 0
@@ -138,6 +141,21 @@ func TestHomeManualMemoryReleaseButton(t *testing.T) {
 	card, _ := tr.Find("首页运行内存")
 	if button.Y < card.Y || button.Y+button.H > card.Y+card.H {
 		t.Fatalf("memory action outside card: button=%+v card=%+v", button, card)
+	}
+}
+
+func TestHomeMemoryUsesTaskManagerPrivateWorkingSet(t *testing.T) {
+	r, svc := homeDashboardFixture(t)
+	tr := ui.NewTester(r.View, 1120, 760)
+	tr.Frame()
+	if !tr.HasText("93.00 MB") || !tr.HasText("私有工作集") || tr.HasText("151.00 MB") {
+		t.Fatal("home memory did not use the Task Manager private working set")
+	}
+
+	svc.State().Update(func(sn *app.Snapshot) { sn.Dashboard.Memory.PrivateWorkingSetBytes = 0 })
+	tr.Frame()
+	if !tr.HasText("151.00 MB") || !tr.HasText("进程工作集") {
+		t.Fatal("home memory did not fall back to the total working set")
 	}
 }
 
