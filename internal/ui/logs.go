@@ -22,15 +22,15 @@ const logPageMax = 500
 // 设置决定采集级别。页面只能收窄该阈值，包括设置更改前采集的旧条目。
 func (r *Root) logsPage(c *ui.Context, snap app.Snapshot) {
 	t := c.Theme()
-	lines := r.svc.Logs()
 	configured := logs.ParseLevel(snap.Settings.LogLevel)
-	filtered := filterLogs(lines, r.logQuery, max(configured, r.logLevel))
+	minLevel := max(configured, r.logLevel)
+	r.ensureLogCache(snap, minLevel)
 
 	ui.Column(c).FillWidth().Gap(t.Space(3)).Children(func() {
 		ui.Row(c).FillWidth().Gap(t.Space(3)).AlignItems(ui.Center).Children(func() {
 			r.levelPicker(c, configured)
 			ui.Spacer(c)
-			ui.Text(c, tr(c, logCountLabel(len(filtered), len(lines)))).
+			ui.Text(c, tr(c, logCountLabel(r.logFiltered, r.logTotal))).
 				TextColor(t.TextMuted).FontSize(t.Rem(0.85))
 		})
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
@@ -65,26 +65,48 @@ func (r *Root) logsPage(c *ui.Context, snap app.Snapshot) {
 				TextColor(t.Warning).FontSize(t.Rem(0.8))
 		}
 
-		if len(filtered) == 0 {
+		if len(r.logLines) == 0 {
 			hint := "还没有日志。连接后内核的日志会出现在这里。"
-			if len(lines) > 0 {
+			if r.logTotal > 0 {
 				hint = "没有匹配的日志行。"
 			}
 			r.emptyState(c, "暂无日志", hint)
 			return
 		}
 
-		display := filtered
-		if !r.logRaw && snap.Settings.Language != "en" {
-			display = append([]logs.Entry(nil), filtered...)
-			for i := range display {
-				display[i].Text = logs.Describe(display[i].Text)
-			}
-		}
-		data.LogList(c, "logs", toLogLines(display), data.LogListOptions{
+		data.LogList(c, "logs", r.logLines, data.LogListOptions{
 			Levels: [4]string{tr(c, "调试"), tr(c, "信息"), tr(c, "警告"), tr(c, "错误")},
 		})
 	})
+}
+
+// ensureLogCache 在日志内容或过滤条件变化时重算显示行，其余帧直接复用。
+//
+// 完整流水线是：复制整个环形缓冲（≤2000 条）→ 级别/文本过滤 → 逐行
+// Describe（多轮正则替换）→ 转换为列表行。日志页每帧渲染，不做记忆化
+// 时这些工作在 60fps 下每秒重复数十次；而缓冲区签名没变时结果不会变。
+func (r *Root) ensureLogCache(snap app.Snapshot, minLevel logs.Level) {
+	count, last := r.svc.LogStamp()
+	query := strings.ToLower(strings.TrimSpace(r.logQuery))
+	if count == r.logStampCount && last == r.logStampLast &&
+		query == r.logCacheQuery && minLevel == r.logCacheLevel &&
+		r.logRaw == r.logCacheRaw && snap.Settings.Language == r.logCacheLang {
+		return
+	}
+
+	lines := r.svc.Logs()
+	filtered := filterLogs(lines, r.logQuery, minLevel)
+	display := filtered
+	if !r.logRaw && snap.Settings.Language != "en" {
+		display = append([]logs.Entry(nil), filtered...)
+		for i := range display {
+			display[i].Text = logs.Describe(display[i].Text)
+		}
+	}
+	r.logLines = toLogLines(display)
+	r.logFiltered, r.logTotal = len(filtered), len(lines)
+	r.logStampCount, r.logStampLast = count, last
+	r.logCacheQuery, r.logCacheLevel, r.logCacheRaw, r.logCacheLang = query, minLevel, r.logRaw, snap.Settings.Language
 }
 
 // levelPicker 切换当前显示的最低日志级别。

@@ -200,5 +200,11 @@ func TestAsyncExportPublishesResult(t *testing.T) {
 type memLogSource struct{ entries []logs.Entry }
 
 func (m *memLogSource) Snapshot() []logs.Entry { return m.entries }
-func (m *memLogSource) Clear()                 {}
-func (m *memLogSource) Dropped() int64         { return 0 }
+func (m *memLogSource) Stamp() (int, logs.Entry) {
+	if len(m.entries) == 0 {
+		return 0, logs.Entry{}
+	}
+	return len(m.entries), m.entries[len(m.entries)-1]
+}
+func (m *memLogSource) Clear()         {}
+func (m *memLogSource) Dropped() int64 { return 0 }

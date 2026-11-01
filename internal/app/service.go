@@ -39,6 +39,9 @@ type Engine interface {
 type LogSource interface {
 	// Snapshot 返回持有的日志行，最旧的在前。
 	Snapshot() []logs.Entry
+	// Stamp 返回变更签名（条目数与最新一条），供视图检测内容变化，
+	// 避免每帧复制整个缓冲区。
+	Stamp() (int, logs.Entry)
 	// Clear 清空内存中的日志行；磁盘文件保留。
 	Clear()
 	// Dropped 返回因写入器落后而丢失的行数。
@@ -1204,6 +1207,17 @@ func (s *Service) Logs() []logs.Entry {
 		return nil
 	}
 	return l.Snapshot()
+}
+
+// LogStamp 返回内存日志的变更签名，不复制缓冲区。
+func (s *Service) LogStamp() (int, logs.Entry) {
+	s.viewMu.RLock()
+	l := s.logs
+	s.viewMu.RUnlock()
+	if l == nil {
+		return 0, logs.Entry{}
+	}
+	return l.Stamp()
 }
 
 // ClearLogs 清空内存中的日志行。磁盘文件保留：它才是事件记录。

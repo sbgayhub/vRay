@@ -25,6 +25,15 @@ func (m *memLogs) Snapshot() []logs.Entry {
 	return append([]logs.Entry(nil), m.entries...)
 }
 
+func (m *memLogs) Stamp() (int, logs.Entry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.entries) == 0 {
+		return 0, logs.Entry{}
+	}
+	return len(m.entries), m.entries[len(m.entries)-1]
+}
+
 func (m *memLogs) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

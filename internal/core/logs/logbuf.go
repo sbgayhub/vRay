@@ -253,6 +253,9 @@ func (c *Collector) persist(e Entry) {
 // Snapshot 返回当前持有的日志，最旧的在前。
 func (c *Collector) Snapshot() []Entry { return c.ring.Snapshot() }
 
+// Stamp 返回环形缓冲的变更签名，零复制。
+func (c *Collector) Stamp() (int, Entry) { return c.ring.Stamp() }
+
 // Clear 清空环形缓冲但保留文件：文件是记录，环形缓冲只是窗口展示的内容。
 func (c *Collector) Clear() { c.ring.Clear() }
 
@@ -314,6 +317,17 @@ func (r *Ring) Len() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.count
+}
+
+// Stamp 返回缓冲区的变更签名：条目数与最新一条。追加、淘汰最旧条目与
+// 清空都会改变签名。调用方用它检测内容是否变化，避免每帧复制整个缓冲区。
+func (r *Ring) Stamp() (count int, last Entry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.count == 0 {
+		return 0, Entry{}
+	}
+	return r.count, r.buf[(r.start+r.count-1)%len(r.buf)]
 }
 
 // Clear 丢弃全部条目。
