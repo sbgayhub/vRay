@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,17 +130,48 @@ func (c *Client) Stats(ctx context.Context, name string, reset bool) (int64, err
 	return resp.GetStat().GetValue(), nil
 }
 
-// Counters 在一次往返中读取多个计数器。
+// Counters 读取多个计数器，不存在时报告为零。
 //
-// Xray 尚未创建的计数器（例如没有流量使用该出站）会报告为零，而不是错误：
-// 不存在表示“无流量”，这正是 UI 应显示的内容。
+// 不重置的读取（采样主路径：20 节点的策略组每秒要读 40 个名字）走
+// QueryStats 一次往返取回；逐个 GetStats 会放大成同等次数的 RPC。
+// 重置语义必须精确：QueryStats 的 pattern 是子串匹配，会把同前缀的
+// 其他计数器一并清零，因此 reset=true 仍逐个读取。
 func (c *Client) Counters(ctx context.Context, names []string, reset bool) (map[string]int64, error) {
+	out := make(map[string]int64, len(names))
+	for _, name := range names {
+		out[name] = 0
+	}
+	if reset {
+		return c.countersOneByOne(ctx, out, reset)
+	}
+	pattern := counterPattern(names)
+	if pattern == "" {
+		return c.countersOneByOne(ctx, out, reset)
+	}
 	client, err := c.statsClient()
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]int64, len(names))
-	for _, name := range names {
+	resp, err := client.QueryStats(ctx, &stats.QueryStatsRequest{Pattern: pattern, Reset_: reset})
+	if err != nil {
+		// 批量查询失败不致命：退回逐个读取。
+		return c.countersOneByOne(ctx, out, reset)
+	}
+	for _, stat := range resp.GetStat() {
+		if _, wanted := out[stat.GetName()]; wanted {
+			out[stat.GetName()] = stat.GetValue()
+		}
+	}
+	return out, nil
+}
+
+// countersOneByOne 逐个读取计数器；请求列表中 Xray 尚未创建的名字报告为零。
+func (c *Client) countersOneByOne(ctx context.Context, out map[string]int64, reset bool) (map[string]int64, error) {
+	client, err := c.statsClient()
+	if err != nil {
+		return nil, err
+	}
+	for name := range out {
 		resp, err := client.GetStats(ctx, &stats.GetStatsRequest{Name: name, Reset_: reset})
 		if err != nil {
 			return nil, fmt.Errorf("API 客户端：读取 %s 失败：%w", name, err)
@@ -147,6 +179,27 @@ func (c *Client) Counters(ctx context.Context, names []string, reset bool) (map[
 		out[name] = resp.GetStat().GetValue()
 	}
 	return out, nil
+}
+
+// counterPattern 返回所有名字的公共前缀，并对齐到 ">>>" 分隔符边界，
+// 供 QueryStats 做子串匹配；没有公共前缀时返回空串。
+func counterPattern(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	prefix := names[0]
+	for _, n := range names[1:] {
+		for !strings.HasPrefix(n, prefix) {
+			prefix = prefix[:len(prefix)-1]
+			if prefix == "" {
+				return ""
+			}
+		}
+	}
+	if i := strings.LastIndex(prefix, ">>>"); i >= 0 {
+		return prefix[:i+3]
+	}
+	return ""
 }
 
 // statsClient 返回当前可用的客户端；若未连接则返回 ErrNotConnected。
