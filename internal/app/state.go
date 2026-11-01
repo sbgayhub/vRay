@@ -1,8 +1,7 @@
 // Package app 持有 vRay 的状态以及视图调用的操作。
 //
 // UI 通过 Snapshot（返回深拷贝）读取 State，并调用从不阻塞的 Service 方法。
-// 所有接触内核或磁盘的工作都在独立 goroutine 中运行；见 docs/02 §5.9
-// 与 docs/03 §4 的并发规则。
+// 所有接触内核或磁盘的工作都在独立 goroutine 中运行，遵循统一的并发规则。
 package app
 
 import (

@@ -63,7 +63,7 @@ func tunInput() Input {
 	return in
 }
 
-// everyBuildLoads 是最关键的检查：Xray 必须接受我们生成的配置（docs/03 S3 DoD）。
+// everyBuildLoads 是最关键的检查：Xray 必须接受我们生成的配置。
 func everyBuildLoads(t *testing.T, in Input) {
 	t.Helper()
 	raw, diags, err := Build(in)
@@ -173,7 +173,7 @@ func TestBuildWithMuxAndExtraNodesLoads(t *testing.T) {
 }
 
 // TUN 模式会让 Xray 自身的流量绕开隧道：配置必须指定出站接口，
-// 否则经由 tun 的默认路由会形成环路（docs/02 §1.2）。
+// 否则经由 tun 的默认路由会形成环路。
 func TestTunConfigKeepsLoopGuard(t *testing.T) {
 	raw, _, err := Build(tunInput())
 	if err != nil {
@@ -302,7 +302,7 @@ func TestValidation(t *testing.T) {
 	}
 }
 
-// 两种模式仅在入站配置上不同，符合 docs/02 §6.3 的要求。
+// 两种模式仅在入站配置上不同。
 func TestModesDifferOnlyInInbounds(t *testing.T) {
 	sp, _, err := Build(systemProxyInput())
 	if err != nil {

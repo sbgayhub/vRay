@@ -1,8 +1,8 @@
 // Package core 在 vRay 进程内运行 Xray。
 //
 // 这里的 Xray 是库而不是子进程：core.New 与 Instance.Start 都在本进程内
-// 执行（docs/02 §2.1）。这意味着内核里的 panic 会连同 UI 一起拖垮，
-// 因此每次进入内核的调用都经过 recover；见 docs/02 §6.5.3。
+// 执行。这意味着内核里的 panic 会连同 UI 一起拖垮，
+// 因此每次进入内核的调用都经过 recover。
 package core
 
 import (
@@ -16,14 +16,14 @@ import (
 	"github.com/sbgayhub/vray/internal/core/configgen"
 	"github.com/xtls/xray-core/core"
 
-	// 只注册客户端需要的能力；见 docs/04 §4.3.1。
+	// 只注册客户端需要的能力。
 	_ "github.com/sbgayhub/vray/internal/core/distro"
 )
 
 // Phase 表示内核所处的生命周期阶段。
 type Phase string
 
-// 内核阶段；状态图见 docs/02 §6.5。
+// 内核阶段的取值。
 const (
 	PhaseIdle      Phase = "idle"
 	PhasePreflight Phase = "preflight"
@@ -77,7 +77,7 @@ type Engine struct {
 	since           time.Time
 
 	// load 在启动前校验配置。做成字段是为了让测试替换成会 panic 的版本，
-	// 以证明 Start 周围的 recover 有效（docs/03 S4-5）；生产环境始终使用
+	// 以证明 Start 周围的 recover 有效；生产环境始终使用
 	// core.LoadConfig。
 	load func(cfg []byte) (*core.Config, error)
 
@@ -243,7 +243,7 @@ func (e *Engine) Stop() (err error) {
 		e.policyCancel = nil
 		e.policyDone = nil
 	}
-	closeErr := e.inst.Close() // 幂等操作，测量结果见 docs/02 §1.3
+	closeErr := e.inst.Close() // 幂等操作
 	e.inst = nil
 
 	if closeErr != nil {

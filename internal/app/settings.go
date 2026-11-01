@@ -12,8 +12,7 @@ import (
 
 // SettingsView 是设置页的模型。
 //
-// 每次 Load 都从存储构建，页面自己从不读文件：视图不做 IO
-// （docs/02 §5.9）。
+// 每次 Load 都从存储构建，页面自己从不读文件：视图不做 IO。
 type SettingsView struct {
 	ActiveGroup         string `json:"activeGroup,omitempty"`
 	Language            string `json:"language"`

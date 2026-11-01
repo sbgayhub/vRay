@@ -1,7 +1,7 @@
 // Package distro 精确注册客户端所需的 Xray 组件。
 //
 // 它替代 main/distro/all。后者还会引入服务端代理、TOML 和 YAML 加载器
-// 以及完整的 CLI 命令树；仅导入该包就测得 43.6 MB（docs/02 §4.3.1）。
+// 以及完整的 CLI 命令树；仅导入该包就测得 43.6 MB。
 // 这里的每个包都会在 init 函数中自行注册，因此组件未注册时，
 // LoadConfig 会以 "unknown protocol" 失败，而不是在运行时出现异常行为。
 //

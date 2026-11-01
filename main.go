@@ -39,7 +39,7 @@ func main() {
 	// 本地化目录由 locales 包内嵌并注册。
 
 	// 默认使用当前用户的标准数据目录；便携模式、VRAY_DATA 覆盖和旧目录
-	// 迁移都由 paths 包统一处理（docs/02 §9.1）。
+	// 迁移都由 paths 包统一处理。
 	p, err := paths.Resolve()
 	if err != nil {
 		fatal("解析数据目录失败", err)
@@ -100,7 +100,7 @@ func main() {
 		fatal("加载应用数据失败", err)
 	}
 
-	// 崩溃补偿的第 3 层（docs/02 §6.5.4.2）：若上次运行留下了系统变更，
+	// 崩溃补偿的第 3 层：若上次运行留下了系统变更，
 	// 在其他事情发生前先撤销。第 2 层是下方的退出钩子；第 1 层是
 	// Disconnect 自带的还原。
 	if recovered, err := svc.RecoverEffects(); err != nil {
@@ -112,7 +112,7 @@ func main() {
 	}
 
 	// geo 数据文件就位前 Xray 无法按 geoip/geosite 分流，因此在后台
-	// 下载，应用保持可用（docs/02 §9.1）。
+	// 下载，应用保持可用。
 	geoDL := geo.New(p.Root)
 	svc.AttachGeo(geoDL)
 	defer geoDL.Cancel()

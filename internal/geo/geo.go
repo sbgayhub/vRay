@@ -1,8 +1,7 @@
 // geo 包负责下载 Xray 的 geoip.dat 和 geosite.dat。
 //
-// 两者合计 26 MB，缺少它们时 Xray 无法读取 geoip:/geosite: 规则
-// （docs/notes/s3-configgen.md）。应用不会因等待它们而阻塞：先使用普通规则启动，
-// 在后台下载，准备就绪后再提示（docs/02 §9.1）。
+// 两者合计 26 MB，缺少它们时 Xray 无法读取 geoip:/geosite: 规则。
+// 应用不会因等待它们而阻塞：先使用普通规则启动，在后台下载，准备就绪后再提示。
 package geo
 
 import (

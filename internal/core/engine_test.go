@@ -125,8 +125,7 @@ func TestEngineIdempotence(t *testing.T) {
 	}
 }
 
-// TestEngineRestartAcrossInstances 回答 docs/03 S1-4：
-// Close 后能否在同一进程内再次启动 Xray？切换节点依赖这一点。
+// TestEngineRestartAcrossInstances 验证：Close 后能否在同一进程内再次启动 Xray？切换节点依赖这一点。
 func TestEngineRestartAcrossInstances(t *testing.T) {
 	goroutinesBefore := runtime.NumGoroutine()
 

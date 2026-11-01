@@ -68,7 +68,7 @@ func (f *editForm) problemFor(field string) string {
 // openEdit 开始编辑指定 ID 的节点。
 //
 // 存储读取在点击时发生，而不是在每帧中进行：Profile() 属于 IO，
-// 视图不得每帧执行 IO（docs/02 §5.9）。
+// 视图不得每帧执行 IO。
 func (r *Root) openEdit(id string) {
 	p, ok := r.svc.Profile(id)
 	if !ok {

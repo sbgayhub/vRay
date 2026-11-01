@@ -63,8 +63,7 @@ func geoDataDir(t *testing.T) string {
 
 // TestGeoRulesLoadWithAssetLocation 证明项目在实践中发现的真实依赖：
 // 只有当 Xray 能找到 geoip.dat 和 geosite.dat 时，geoip: 和 geosite: 规则
-// 才能工作，而 Xray 通过 xray.location.asset 查找它们
-// （docs/notes/s3-configgen.md）。
+// 才能工作，而 Xray 通过 xray.location.asset 查找它们。
 func TestGeoRulesLoadWithAssetLocation(t *testing.T) {
 	dir := geoDataDir(t)
 	if dir == "" {

@@ -315,7 +315,7 @@ func logLevelName(level string) string {
 }
 
 // selfCheckCard 是环境报告：每项检查一行，每行带文字说明，
-// 使状态不只依赖颜色（docs/02 §8.15）。
+// 使状态不只依赖颜色。
 func (r *Root) selfCheckCard(c *ui.Context, snap app.Snapshot) {
 	t := c.Theme()
 	if snap.Checks != nil {

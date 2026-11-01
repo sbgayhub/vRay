@@ -49,9 +49,8 @@ func TestEngineStartupPanicReleasesListener(t *testing.T) {
 	defer e.Stop()
 }
 
-// 核心内部的 panic 必须被捕获，使窗口能够继续存活并重试
-// （docs/03 S4-5）。将配置校验器替换为会 panic 的实现，
-// 是故意进入 Start 周围 recover 分支的唯一方式。
+// 核心内部的 panic 必须被捕获，使窗口能够继续存活并重试。
+// 将配置校验器替换为会 panic 的实现，是故意进入 Start 周围 recover 分支的唯一方式。
 func TestEngineRecoversFromPanic(t *testing.T) {
 	e := New()
 	e.load = func([]byte) (*xray.Config, error) { panic("injected: config loader blew up") }
@@ -87,8 +86,7 @@ func TestEngineRecoversFromPanic(t *testing.T) {
 	}
 }
 
-// 十轮启动/停止后，goroutine 数量每轮增长不得超过一个：
-// docs/03 S4 DoD。
+// 十轮启动/停止后，goroutine 数量每轮增长不得超过一个。
 func TestEngineTenRoundsNoLeak(t *testing.T) {
 	runtime.GC()
 	time.Sleep(200 * time.Millisecond)

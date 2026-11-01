@@ -1,7 +1,7 @@
 // ui 包包含 vRay 的原生视图。
 //
 // 这里的每个函数都是一个视图：在主线程上每帧运行一次，
-// 不得执行 IO 或阻塞。用户意图交由 app.Service 处理；参见 docs/02 §5.9。
+// 不得执行 IO 或阻塞。用户意图交由 app.Service 处理。
 package ui
 
 import (
@@ -94,7 +94,7 @@ type Root struct {
 	sourceRemoveNodes                   bool
 
 	// search、nodeSel、importText 和日志筛选条件均为视图本地 UI 状态：
-	// 输入时不会访问服务（docs/02 §5.9）。
+	// 输入时不会访问服务。
 	search                                   string
 	nodeSel                                  int
 	importText                               string

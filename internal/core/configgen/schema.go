@@ -3,9 +3,7 @@ package configgen
 import "encoding/json"
 
 // 下面的 JSON 结构对应 Xray 自身的配置加载器（infra/conf）。字段名与嵌套
-// 关系是与 LoadConfig 的契约；黄金测试会验证每种可生成的配置都能真正加载
-//（docs/02 §6.2）。
-
+// 关系是与 LoadConfig 的契约；黄金测试会验证每种可生成的配置都能真正加载。
 type config struct {
 	Policies    *PolicyMetadata    `json:"vrayPolicies,omitempty"`
 	Log         logConfig          `json:"log"`

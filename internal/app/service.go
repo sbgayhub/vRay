@@ -405,8 +405,7 @@ func (s *Service) closeStatsLocked() {
 	}
 }
 
-// EnsureGeo 在文件缺失时启动后台下载。它立即返回：文件到达前应用仍可用
-// （docs/02 §9.1）。
+// EnsureGeo 在文件缺失时启动后台下载。它立即返回：文件到达前应用仍可用。
 func (s *Service) EnsureGeo() {
 	s.mu.Lock()
 	d := s.geo
@@ -794,7 +793,7 @@ func (s *Service) saveMode(mode string) bool {
 // prepareConfig 设置 Xray 读取数据文件所需的环境。
 //
 // Xray 通过 `xray.location.asset` 环境变量查找 geoip.dat 与 geosite.dat，
-// 因此必须在实例启动前指向数据目录（docs/02 §9.1）。文件缺失时 geo 规则
+// 因此必须在实例启动前指向数据目录。文件缺失时 geo 规则
 // 只是加载失败，所以配置生成器只在文件存在时才输出这些规则。
 func (s *Service) prepareConfig(cfg []byte) []byte {
 	_ = os.Setenv(assetLocationEnv, s.paths.Root)
@@ -976,7 +975,7 @@ func EditProblems(e ProfileEdit, stored store.Profile) []EditProblem {
 
 // Prober 返回延迟探测器，首次使用时创建。
 //
-// 视图通过它读取结果，自己从不拨号，因为一帧绝不能阻塞（docs/02 §5.9）。
+// 视图通过它读取结果，自己从不拨号，因为一帧绝不能阻塞。
 // 重绘通过与状态相同的回调请求，因此结果落地后会在下一帧出现。
 func (s *Service) Prober() *Prober {
 	s.viewMu.Lock()

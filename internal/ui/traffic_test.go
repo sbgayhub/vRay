@@ -8,8 +8,7 @@ import (
 	"github.com/sbgayhub/vray/internal/app"
 )
 
-// 首页仅在已连接时显示速率：此前显示的零值没有意义，标题栏也从不显示速率
-// （docs/02 §4.4.0）。
+// 首页仅在已连接时显示速率：此前显示的零值没有意义，标题栏也从不显示速率。
 func TestHomeShowsRatesWhenConnected(t *testing.T) {
 	r, svc := newRoot(t)
 	svc.State().Update(func(s *app.Snapshot) {

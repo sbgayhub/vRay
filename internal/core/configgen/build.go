@@ -212,7 +212,7 @@ func buildInbounds(in Input) []inbound {
 			tunSettings["gateway"] = in.Settings.TunGateway
 		}
 		// 让 Xray 自身的上行流量绕开隧道；否则经 tun 的默认路由会形成
-		// 回环（docs/02 §1.2）。
+		// 回环。
 		tunSettings["autoSystemRoutingTable"] = []string{"0.0.0.0/0", "::/0"}
 		if in.Settings.TunOutboundInterface != "" {
 			tunSettings["autoOutboundsInterface"] = in.Settings.TunOutboundInterface
@@ -354,7 +354,7 @@ func buildRouting(in Input) routingConfig {
 }
 
 // buildDNS 保留给定的上游地址；调用方必须传入 IP 形式端点，避免解析
-// 经由隧道形成回环（docs/02 §5.8，计划 P11）。
+// 经由隧道形成回环。
 func buildDNS(s Settings) *dnsConfig {
 	cfg := &dnsConfig{}
 	if s.FakeDNS {

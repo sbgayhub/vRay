@@ -148,8 +148,7 @@ func TestCollectorLevelFilter(t *testing.T) {
 	}
 }
 
-// 即使写入方跟不上，Handle 也绝不能阻塞：它运行在代理的写入路径上
-// （docs/03 陷阱 P9）。
+// 即使写入方跟不上，Handle 也绝不能阻塞：它运行在代理的写入路径上。
 func TestHandleNeverBlocks(t *testing.T) {
 	// 写入 goroutine 尚未启动的收集器无法排空队列；
 	// Handle 仍必须返回，并丢弃行而不是等待。

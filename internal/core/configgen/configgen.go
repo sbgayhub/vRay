@@ -1,7 +1,7 @@
 // Package configgen 把 vRay 的设置与节点转换为 Xray 的 JSON 配置。
 //
 // 它是 Input 的纯函数：不读时钟、不碰文件、不访问网络。因此黄金测试
-// 才有意义，UI 也能在不启动任何东西的情况下预览配置（docs/02 §6.2）。
+// 才有意义，UI 也能在不启动任何东西的情况下预览配置。
 package configgen
 
 import (
@@ -89,8 +89,7 @@ type Settings struct {
 	ProbeInterval string
 
 	// GeoReady 表示 geoip.dat 与 geosite.dat 已在磁盘上。文件缺失时 Xray
-	// 会拒绝引用 geo 规则的配置，因此只有下载完成后才输出 geo 规则
-	//（docs/02 §9.1）。
+	// 会拒绝引用 geo 规则的配置，因此只有下载完成后才输出 geo 规则。
 	GeoReady bool
 }
 
@@ -136,7 +135,7 @@ const (
 // blocks 报告该诊断是否阻止构建配置。
 func (d Diagnostic) blocks() bool { return d.Severity != SeverityWarning }
 
-// 配置中使用的标签名；见 docs/02 §6.1。
+// 配置中使用的标签名。
 const (
 	TagProxy   = "proxy"
 	TagDirect  = "direct"

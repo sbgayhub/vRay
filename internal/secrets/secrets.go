@@ -2,7 +2,7 @@
 //
 // MyGO 的 Secrets 使用系统存储（Keychain、Secret Service、Credential Manager），
 // 每个值上限为 2560 字节（mygo.MaxSecretSize）。订阅 URL 和 ss 密码可能超过该上限，
-// 因此过大的值会改为加密后写入存储旁的文件（docs/02 §5.2，计划 P12）。
+// 因此过大的值会改为加密后写入存储旁的文件。
 package secrets
 
 import (

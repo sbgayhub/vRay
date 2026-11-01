@@ -39,8 +39,7 @@ type ImportInput struct {
 
 // Import 导入粘贴的链接或订阅 URL。
 //
-// 它在后台运行：抓取订阅属于网络 IO，绝不能阻塞看到点击的那一帧
-// （docs/02 §5.9）。
+// 它在后台运行：抓取订阅属于网络 IO，绝不能阻塞看到点击的那一帧。
 func (s *Service) Import(in ImportInput) {
 	started := false
 	s.state.Update(func(sn *Snapshot) {
