@@ -133,3 +133,27 @@ func TestBuildEmitsRuleWithProcess(t *testing.T) {
 		}
 	}
 }
+
+// 只配进程名的规则同样是有效规则：曾经因为 buildRouting 的"空规则"判断
+// 漏掉 Process 而被静默丢弃，永不生效。
+func TestBuildEmitsRuleWithOnlyProcess(t *testing.T) {
+	in := systemProxyInput()
+	in.Rules = []Rule{{
+		ID: "1", Name: "work", Outbound: TagDirect,
+		Process: []string{"steam.exe"},
+	}}
+	cfg, diags, err := Build(in)
+	if err != nil {
+		t.Fatalf("Build: %v (%+v)", err, diags)
+	}
+	text := string(cfg)
+	for _, want := range []string{
+		`"ruleTag": "rule-1"`,
+		`"steam.exe"`,
+		`"outboundTag": "direct"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config lost %s\n%s", want, text)
+		}
+	}
+}

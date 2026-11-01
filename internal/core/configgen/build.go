@@ -322,7 +322,8 @@ func buildRouting(in Input) routingConfig {
 		}
 		// 没有匹配器的规则会被 Xray 拒绝（"no effective fields"），因此跳过，
 		// 而不是输出无法启动的配置。validate() 已把空规则转为诊断信息。
-		if len(r.Domains) == 0 && len(r.IPs) == 0 && r.Ports == "" && len(r.Networks) == 0 {
+		// Process 也是匹配器：只配进程名的规则同样会在这里被丢掉。
+		if len(r.Domains) == 0 && len(r.IPs) == 0 && r.Ports == "" && len(r.Networks) == 0 && len(r.Process) == 0 {
 			continue
 		}
 		rule := routingRule{
