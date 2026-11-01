@@ -354,7 +354,7 @@ func (r *Root) policyGroupDeleteConfirmation(c *ui.Context, snap app.Snapshot) {
 func (r *Root) policyGroupEditorBody(c *ui.Context, snap app.Snapshot) {
 	t := c.Theme()
 	f := &r.policyEditor
-	index := indexPolicies(snap)
+	index := r.policiesIndex(snap)
 	_, height := c.Size()
 	listHeight := float32(260)
 	if height < 700 {

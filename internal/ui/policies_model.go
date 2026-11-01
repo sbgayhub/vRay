@@ -109,6 +109,21 @@ func indexPolicies(snap app.Snapshot) policyIndex {
 	return index
 }
 
+// policiesIndex 返回当前状态的策略索引，并按状态版本号缓存。
+//
+// 组页与编辑弹窗每帧各调一次 indexPolicies（建 4 个 map 加一次 BFS）；
+// 索引只取决于已提交的快照，而版本号在任何状态变更时递增，因此空闲帧
+// 可以直接复用上一次的结果。
+func (r *Root) policiesIndex(snap app.Snapshot) policyIndex {
+	ver := r.svc.State().Version()
+	if ver == r.policyIndexVer && r.policyIndexCache.groups != nil {
+		return r.policyIndexCache
+	}
+	index := indexPolicies(snap)
+	r.policyIndexVer, r.policyIndexCache = ver, index
+	return index
+}
+
 func (index policyIndex) name(id string) string {
 	if p, ok := index.nodes[id]; ok {
 		return p.Name

@@ -90,9 +90,13 @@ type Root struct {
 	selectedGroup                       string
 	groups                              policyBrowser
 	policyEditor                        policyGroupEditor
-	sourceF                             sourceForm
-	sourceDeleting                      string
-	sourceRemoveNodes                   bool
+	// 组页与编辑弹窗每帧各构建一次策略索引；索引只取决于已提交的状态，
+	// 以状态版本号为键缓存后，空闲帧直接复用。
+	policyIndexVer    uint64
+	policyIndexCache  policyIndex
+	sourceF           sourceForm
+	sourceDeleting    string
+	sourceRemoveNodes bool
 
 	// search、nodeSel、importText 和日志筛选条件均为视图本地 UI 状态：
 	// 输入时不会访问服务。

@@ -85,7 +85,7 @@ func (r *Root) groupsPage(c *ui.Context, snap app.Snapshot) {
 		return
 	}
 	r.refreshPolicyHealth(c, snap)
-	index := indexPolicies(snap)
+	index := r.policiesIndex(snap)
 	g, ok := index.groups[r.selectedGroup]
 	if !ok {
 		r.selectedGroup = snap.Settings.ActiveGroup
